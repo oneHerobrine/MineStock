@@ -31,6 +31,17 @@ public class MainConfig {
         return cfg().getInt("api-cooldown-seconds", 30);
     }
 
+    /**
+     * 获取操作冷却时间（毫秒）。
+     * 优先读取 api-cooldown-ms，不存在则兼容旧配置 api-cooldown-seconds × 1000。
+     */
+    public long getApiCooldownMs() {
+        if (cfg().contains("api-cooldown-ms")) {
+            return cfg().getLong("api-cooldown-ms", 1000L);
+        }
+        return cfg().getInt("api-cooldown-seconds", 30) * 1000L;
+    }
+
     public double getPriceRatio() {
         return cfg().getDouble("price-ratio", 1.0);
     }

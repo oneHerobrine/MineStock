@@ -7,7 +7,8 @@ recommended-pool:
   - "MSFT"
 recommended-count: 3
 
-api-cooldown-seconds: 30
+# 操作冷却时间（毫秒），旧配置 api-cooldown-seconds 仍兼容
+api-cooldown-ms: 1000
 
 price-ratio: 1.0
 

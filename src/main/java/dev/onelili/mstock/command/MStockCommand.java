@@ -11,7 +11,6 @@ import dev.onelili.mstock.ui.ChatInputSession;
 import dev.onelili.mstock.ui.PendingAction;
 import dev.onelili.mstock.util.LangUtil;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -75,7 +74,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                         lang.send(player, "input-invalid");
                     }
                 } else {
-                    player.sendMessage("用法: /mstock buy <代码> <数量>");
+                    lang.sendNoPrefix(player, "usage");
                 }
             }
             case "sell" -> {
@@ -86,7 +85,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                         lang.send(player, "input-invalid");
                     }
                 } else {
-                    player.sendMessage("用法: /mstock sell <代码> <数量>");
+                    lang.sendNoPrefix(player, "usage");
                 }
             }
             case "recommended", "rec", "r" -> showRecommendations(player);
@@ -114,7 +113,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 if (api.isSupported(code)) {
                     showStockDetail(player, code);
                 } else {
-                    lang.sendNoPrefix(player, "usage");
+                    lang.send(player, "unsupported-code", "code", code);
                 }
             }
         }
@@ -131,7 +130,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         }
 
         lang.sendNoPrefix(player, "recommend-header");
-        player.sendMessage(LangUtil.parse("<gray>正在获取推荐股票...</gray>"));
+        player.sendMessage(LangUtil.parse("  <gray>正在获取行情…</gray>"));
 
         List<CompletableFuture<StockInfo>> futures = pool.stream()
                 .map(api::fetch)
@@ -148,8 +147,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
 
                     plugin.getServer().getScheduler().runTask(plugin, () -> {
                         for (StockInfo info : stocks) {
-                            Component line = buildRecommendLine(info);
-                            player.sendMessage(line);
+                            player.sendMessage(buildRecommendLine(info));
                         }
                         lang.sendNoPrefix(player, "recommend-hint");
                     });
@@ -159,31 +157,30 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     private Component buildRecommendLine(StockInfo info) {
         String key = info.getChangePercent() >= 0 ? "recommend-item-up" : "recommend-item-down";
         return lang.getNoPrefix(key,
-                Placeholder.unparsed("code", info.getCode()),
-                Placeholder.unparsed("name", info.getName()),
-                Placeholder.unparsed("price", df.format(info.getPrice() * config.getPriceRatio())),
-                Placeholder.unparsed("change", df.format(Math.abs(info.getChangePercent())))
+                "code", info.getCode(),
+                "name", info.getName(),
+                "price", df.format(info.getPrice() * config.getPriceRatio()),
+                "change", df.format(Math.abs(info.getChangePercent()))
         );
     }
 
     private void showStockDetail(Player player, String code) {
         if (checkCooldown(player)) return;
 
-        lang.send(player, "api-fetching", Placeholder.unparsed("code", code));
+        lang.send(player, "api-fetching", "code", code);
 
         api.fetch(code).thenAccept(info -> {
             plugin.getServer().getScheduler().runTask(plugin, () -> {
                 lang.sendNoPrefix(player, "stock-header",
-                        Placeholder.unparsed("name", info.getName()),
-                        Placeholder.unparsed("code", info.getCode()));
+                        "name", info.getName(),
+                        "code", info.getCode());
 
-                String stockPriceKey = info.getChangePercent() >= 0 ? "stock-price-up" : "stock-price-down";
-                lang.sendNoPrefix(player, stockPriceKey,
-                        Placeholder.unparsed("price", df.format(info.getPrice() * config.getPriceRatio())),
-                        Placeholder.unparsed("change", df.format(Math.abs(info.getChangePercent()))));
+                String priceKey = info.getChangePercent() >= 0 ? "stock-price-up" : "stock-price-down";
+                lang.sendNoPrefix(player, priceKey,
+                        "price", df.format(info.getPrice() * config.getPriceRatio()),
+                        "change", df.format(Math.abs(info.getChangePercent())));
 
-                lang.sendNoPrefix(player, "stock-actions",
-                        Placeholder.unparsed("code", code));
+                lang.sendNoPrefix(player, "stock-actions", "code", code);
             });
         }).exceptionally(ex -> {
             plugin.getServer().getScheduler().runTask(plugin, () ->
@@ -202,18 +199,17 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                         lang.sendNoPrefix(player, "portfolio-empty");
                         return;
                     }
-
                     for (Holding h : holdings) {
-                        api.fetch(h.getStockCode()).thenAccept(info -> {
-                            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                                Component line = lang.getNoPrefix("portfolio-item",
-                                        Placeholder.unparsed("code", h.getStockCode()),
-                                        Placeholder.unparsed("name", info.getName()),
-                                        Placeholder.unparsed("amount", String.valueOf(h.getAmount())),
-                                        Placeholder.unparsed("avg_cost", df.format(h.getAvgCost() * config.getPriceRatio())));
-                                player.sendMessage(line);
-                            });
-                        }).exceptionally(ex -> null);
+                        api.fetch(h.getStockCode()).thenAccept(info ->
+                                plugin.getServer().getScheduler().runTask(plugin, () ->
+                                        player.sendMessage(lang.getNoPrefix("portfolio-item",
+                                                "code", h.getStockCode(),
+                                                "name", info.getName(),
+                                                "amount", String.valueOf(h.getAmount()),
+                                                "avg_cost", df.format(h.getAvgCost() * config.getPriceRatio())
+                                        ))
+                                )
+                        ).exceptionally(ex -> null);
                     }
                 });
             } catch (SQLException e) {
@@ -225,12 +221,13 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
 
     private void initBuy(Player player, String code) {
         session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.BUY, code));
-        lang.send(player, "buy-prompt", Placeholder.unparsed("code", code));
+        // sendNoPrefix 避免双重前缀（buy-prompt 已在 lang.yml 中不含前缀）
+        lang.send(player, "buy-prompt", "code", code);
     }
 
     private void initSell(Player player, String code) {
         session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.SELL, code));
-        lang.send(player, "sell-prompt", Placeholder.unparsed("code", code));
+        lang.send(player, "sell-prompt", "code", code);
     }
 
     public void executeBuy(Player player, String code, int amount) {
@@ -240,11 +237,11 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         }
 
         if (!api.isSupported(code)) {
-            player.sendMessage("不支持的股票代码");
+            lang.send(player, "unsupported-code", "code", code);
             return;
         }
 
-        lang.send(player, "api-fetching", Placeholder.unparsed("code", code));
+        lang.send(player, "api-fetching", "code", code);
 
         api.fetch(code).thenAccept(info -> {
             double unitPrice = info.getPrice() * config.getPriceRatio();
@@ -253,8 +250,8 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
             plugin.getServer().getScheduler().runTask(plugin, () -> {
                 if (!economy.has(player, totalCost)) {
                     lang.send(player, "not-enough-money",
-                            Placeholder.unparsed("need", df.format(totalCost)),
-                            Placeholder.unparsed("balance", df.format(economy.getBalance(player))));
+                            "need", df.format(totalCost),
+                            "balance", df.format(economy.getBalance(player)));
                     return;
                 }
 
@@ -266,12 +263,12 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
                     try {
                         holdingRepo.upsertBuy(player.getUniqueId(), code, amount, unitPrice);
-                        plugin.getServer().getScheduler().runTask(plugin, () -> {
-                            lang.send(player, "buy-success",
-                                    Placeholder.unparsed("code", code),
-                                    Placeholder.unparsed("amount", String.valueOf(amount)),
-                                    Placeholder.unparsed("cost", df.format(totalCost)));
-                        });
+                        plugin.getServer().getScheduler().runTask(plugin, () ->
+                                lang.send(player, "buy-success",
+                                        "code", code,
+                                        "amount", String.valueOf(amount),
+                                        "unit_price", df.format(unitPrice),
+                                        "cost", df.format(totalCost)));
                     } catch (SQLException e) {
                         plugin.getLogger().warning("买入写库失败: " + e.getMessage());
                         plugin.getServer().getScheduler().runTask(plugin, () -> {
@@ -299,20 +296,20 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 Holding holding = holdingRepo.findByPlayerAndCode(player.getUniqueId(), code);
                 if (holding == null) {
                     plugin.getServer().getScheduler().runTask(plugin, () ->
-                            lang.send(player, "no-holding", Placeholder.unparsed("code", code)));
+                            lang.send(player, "no-holding", "code", code));
                     return;
                 }
 
                 if (holding.getAmount() < amount) {
                     plugin.getServer().getScheduler().runTask(plugin, () ->
                             lang.send(player, "not-enough-holding",
-                                    Placeholder.unparsed("hold", String.valueOf(holding.getAmount())),
-                                    Placeholder.unparsed("amount", String.valueOf(amount))));
+                                    "hold", String.valueOf(holding.getAmount()),
+                                    "amount", String.valueOf(amount)));
                     return;
                 }
 
                 plugin.getServer().getScheduler().runTask(plugin, () ->
-                        lang.send(player, "api-fetching", Placeholder.unparsed("code", code)));
+                        lang.send(player, "api-fetching", "code", code));
 
                 api.fetch(code).thenAccept(info -> {
                     double sellPrice = info.getPrice() * config.getPriceRatio();
@@ -326,9 +323,9 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                                     plugin.getLogger().severe("卖出加钱失败！玩家 " + player.getName());
                                 }
                                 lang.send(player, "sell-success",
-                                        Placeholder.unparsed("code", code),
-                                        Placeholder.unparsed("amount", String.valueOf(amount)),
-                                        Placeholder.unparsed("income", df.format(income)));
+                                        "code", code,
+                                        "amount", String.valueOf(amount),
+                                        "income", df.format(income));
                             });
                         } catch (SQLException e) {
                             plugin.getLogger().warning("卖出写库失败: " + e.getMessage());
@@ -353,10 +350,13 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         UUID uuid = player.getUniqueId();
         long now = System.currentTimeMillis();
         Long last = cooldowns.get(uuid);
-        int cd = config.getApiCooldownSeconds();
-        if (last != null && now - last < cd * 1000L) {
-            long remain = (cd * 1000L - (now - last)) / 1000;
-            lang.send(player, "api-cooldown", Placeholder.unparsed("seconds", String.valueOf(remain)));
+        long cdMs = config.getApiCooldownMs();
+        if (last != null && now - last < cdMs) {
+            long remainMs = cdMs - (now - last);
+            String display = remainMs >= 1000
+                    ? (remainMs / 1000) + "." + (remainMs % 1000 / 100) + " 秒"
+                    : remainMs + " ms";
+            lang.send(player, "api-cooldown", "seconds", display);
             return true;
         }
         cooldowns.put(uuid, now);

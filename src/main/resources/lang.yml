@@ -1,46 +1,48 @@
-prefix: "<gold>[MineStock]</gold> "
-no-permission: "<red>你没有权限执行此命令。</red>"
-vault-not-found: "<red>未找到 Vault 经济插件，请安装 Vault 和经济插件。</red>"
+prefix: "<dark_gray>[</dark_gray><gold><bold>MineStock</bold></gold><dark_gray>]</dark_gray> "
+no-permission: "<red>✗ 你没有权限执行此命令。</red>"
+vault-not-found: "<red>✗ 未找到经济插件，请确认已安装 Vault 及经济插件。</red>"
 
-recommend-header: "<gold>===== 今日推荐股票 =====</gold>"
-recommend-item-up: "  <click:run_command:'/mstock <code>'><yellow><code></yellow></click> <white><name></white> <green><price></green> 金币  <green>▲ +<change>%</green>"
-recommend-item-down: "  <click:run_command:'/mstock <code>'><yellow><code></yellow></click> <white><name></white> <green><price></green> 金币  <red>▼ -<change>%</red>"
-recommend-hint: "<gray>点击股票代码查看详情</gray>"
+recommend-header: "<gold>▍今日推荐</gold> <dark_gray>─────────────────</dark_gray>"
+recommend-item-up: "  <click:run_command:'/mstock {code}'><hover:show_text:'<gray>点击查看 {code} 详情</gray>'><aqua>{code}</aqua></hover></click> <gray>{name}</gray>  <white>{price}</white> <dark_gray>金币</dark_gray>  <red>▲ +{change}%</red>"
+recommend-item-down: "  <click:run_command:'/mstock {code}'><hover:show_text:'<gray>点击查看 {code} 详情</gray>'><aqua>{code}</aqua></hover></click> <gray>{name}</gray>  <white>{price}</white> <dark_gray>金币</dark_gray>  <green>▼ -{change}%</green>"
+recommend-hint: "<dark_gray>─────────────────────────────</dark_gray>"
 
-stock-header: "<gold>===== <name> (<code>) =====</gold>"
-stock-price-up: "当前价格: <green><price></green> 金币  <green>▲ +<change>%</green>"
-stock-price-down: "当前价格: <green><price></green> 金币  <red>▼ -<change>%</red>"
-stock-actions: "<click:run_command:'/mstock _buy_init <code>'><green><bold>[买入]</bold></green></click>  <click:run_command:'/mstock _sell_init <code>'><red><bold>[卖出]</bold></red></click>"
+stock-header: "<gold>▍{name}</gold> <dark_gray>({code})</dark_gray>"
+stock-price-up: "  <dark_gray>价格</dark_gray>  <white>{price}</white> <dark_gray>金币</dark_gray>   <red>▲ +{change}%</red>"
+stock-price-down: "  <dark_gray>价格</dark_gray>  <white>{price}</white> <dark_gray>金币</dark_gray>   <green>▼ -{change}%</green>"
+stock-actions: "  <click:run_command:'/mstock _buy_init {code}'><hover:show_text:'<gray>买入 {code}</gray>'><green>[ 买入 ]</green></hover></click>   <click:run_command:'/mstock _sell_init {code}'><hover:show_text:'<gray>卖出 {code}</gray>'><red>[ 卖出 ]</red></hover></click>"
 
-portfolio-header: "<gold>===== 我的持仓 =====</gold>"
-portfolio-empty: "<gray>你还没有持仓，输入 /mstock 查看推荐股票。</gray>"
-portfolio-item: "  <yellow><code></yellow> <white><name></white> <gray><amount>股</gray>  均价<white><avg_cost></white>  <click:run_command:'/mstock _sell_init <code>'><red>[卖出]</red></click>"
+portfolio-header: "<gold>▍我的持仓</gold> <dark_gray>─────────────────</dark_gray>"
+portfolio-empty: "<gray>  暂无持仓，</gray><click:run_command:'/mstock recommended'><hover:show_text:'<gray>查看今日推荐</gray>'><white>/mstock recommended</white></hover></click><gray> 查看推荐股票。</gray>"
+portfolio-item: "  <aqua>{code}</aqua> <gray>{name}</gray>  <white>{amount}</white><dark_gray>股</dark_gray>  <dark_gray>均价</dark_gray> <white>{avg_cost}</white>  <click:run_command:'/mstock _sell_init {code}'><hover:show_text:'<gray>卖出 {code}</gray>'><red>[ 卖出 ]</red></hover></click>"
 
-buy-prompt: '<gold>[MineStock]</gold> 请输入购买 <yellow><code></yellow> 的数量 <gray>（输入数字，输入"取消"退出）</gray>：'
-sell-prompt: '<gold>[MineStock]</gold> 请输入卖出 <yellow><code></yellow> 的数量 <gray>（输入数字，输入"取消"退出）</gray>：'
-input-cancelled: "<gray>已取消操作。</gray>"
-input-invalid: "<red>请输入正整数。</red>"
+buy-prompt: "买入 <aqua>{code}</aqua>，请输入数量 <dark_gray>（输入 cancel 退出）</dark_gray>："
+sell-prompt: "卖出 <aqua>{code}</aqua>，请输入数量 <dark_gray>（输入 cancel 退出）</dark_gray>："
+input-cancelled: "<gray>  已取消。</gray>"
+input-invalid: "<red>✗ 请输入正整数。</red>"
 
-buy-success: "<green>成功购买 <yellow><code></yellow> <amount> 股，花费 <white><cost></white> 金币。</green>"
-sell-success: "<green>成功卖出 <yellow><code></yellow> <amount> 股，获得 <white><income></white> 金币。</green>"
-not-enough-money: "<red>余额不足，需要 <need> 金币，当前余额 <balance> 金币。</red>"
-not-enough-holding: "<red>持仓不足，你持有 <hold> 股，不能卖出 <amount> 股。</red>"
-no-holding: "<red>你没有持仓 <code>。</red>"
+buy-success: "<green>✔ 买入成功</green>  <aqua>{code}</aqua> <white>{amount}</white><dark_gray>股</dark_gray>  单价 <white>{unit_price}</white>  合计 <white>{cost}</white> <dark_gray>金币</dark_gray>"
+sell-success: "<green>✔ 卖出成功</green>  <aqua>{code}</aqua> <white>{amount}</white><dark_gray>股</dark_gray>  到账 <white>{income}</white> <dark_gray>金币</dark_gray>"
+not-enough-money: "<red>✗ 余额不足</red>  需要 <white>{need}</white> 金币，当前余额 <white>{balance}</white> 金币"
+not-enough-holding: "<red>✗ 持仓不足</red>  持有 <white>{hold}</white> 股，无法卖出 <white>{amount}</white> 股"
+no-holding: "<red>✗ 你没有持仓 <aqua>{code}</aqua></red>"
+unsupported-code: "<red>✗ 不支持的股票代码 <aqua>{code}</aqua>，A 股请输入 6 位数字，美股请输入英文代码。</red>"
 
-api-cooldown: "<red>操作太频繁，请 <seconds> 秒后再试。</red>"
-api-error: "<red>获取股票数据失败，请稍后重试。</red>"
-api-fetching: "<gray>正在获取 <code> 的实时价格...</gray>"
+api-cooldown: "<gray>  请等待 <white>{seconds}</white> 后再操作。</gray>"
+api-error: "<red>✗ 获取行情失败，请稍后重试。</red>"
+api-fetching: "<gray>  正在获取 <aqua>{code}</aqua> 的实时行情…</gray>"
 
-db-error: "<red>数据库操作失败，操作已回滚。</red>"
+db-error: "<red>✗ 数据库操作失败，已回滚。</red>"
 
-reload-success: "<green>MineStock 配置已重载。</green>"
-reload-no-permission: "<red>只有 OP 或拥有 minestock.admin 权限才能重载。</red>"
+reload-success: "<green>✔ 配置已重载。</green>"
+reload-no-permission: "<red>✗ 需要 minestock.admin 权限。</red>"
 
 usage: |
-  <gold>MineStock 命令帮助:</gold>
-  <white>/mstock recommended</white> <gray>- 查看今日推荐股票</gray>
-  <white>/mstock <代码></white> <gray>- 查询股票实时信息</gray>
-  <white>/mstock buy <代码> <数量></white> <gray>- 购买股票</gray>
-  <white>/mstock sell <代码> <数量></white> <gray>- 卖出股票</gray>
-  <white>/mstock portfolio</white> <gray>- 查看我的持仓</gray>
-  <white>/mstock reload</white> <gray>- 重载配置文件（需要 minestock.admin 权限）</gray>
+  <gold>▍MineStock</gold> <dark_gray>─────────────────────────</dark_gray>
+  <click:run_command:'/mstock recommended'><hover:show_text:'<gray>查看今日推荐股票</gray>'><white>/mstock recommended</white></hover></click>  <dark_gray>今日推荐股票</dark_gray>
+  <white>/mstock <代码></white>                <dark_gray>查询股票实时行情</dark_gray>
+  <click:run_command:'/mstock buy '><hover:show_text:'<gray>/mstock buy &lt;代码&gt; &lt;数量&gt;</gray>'><white>/mstock buy <代码> <数量></white></hover></click>   <dark_gray>买入股票</dark_gray>
+  <click:run_command:'/mstock sell '><hover:show_text:'<gray>/mstock sell &lt;代码&gt; &lt;数量&gt;</gray>'><white>/mstock sell <代码> <数量></white></hover></click>  <dark_gray>卖出股票</dark_gray>
+  <click:run_command:'/mstock portfolio'><hover:show_text:'<gray>查看我的持仓</gray>'><white>/mstock portfolio</white></hover></click>          <dark_gray>我的持仓</dark_gray>
+  <click:run_command:'/mstock reload'><hover:show_text:'<gray>重载配置文件（需要权限）</gray>'><white>/mstock reload</white></hover></click>             <dark_gray>重载配置（需要权限）</dark_gray>
+  <dark_gray>─────────────────────────────────</dark_gray>

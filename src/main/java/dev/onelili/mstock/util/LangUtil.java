@@ -3,15 +3,12 @@ package dev.onelili.mstock.util;
 import dev.onelili.mstock.MineStock;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
-import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
-import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 
 import java.io.File;
-import java.io.FileReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -24,7 +21,6 @@ public class LangUtil {
     public LangUtil(MineStock plugin) {
         File file = new File(plugin.getDataFolder(), "lang.yml");
         if (file.exists()) {
-            // 用 loadFromString 才能真正捕获到 YAML 语法错误
             try {
                 String content = new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
                 YamlConfiguration test = new YamlConfiguration();
@@ -43,7 +39,6 @@ public class LangUtil {
             plugin.saveResource("lang.yml", false);
             lang = YamlConfiguration.loadConfiguration(file);
         }
-        // 合并 jar 内默认值（填补缺失 key）
         InputStream defaultStream = plugin.getResource("lang.yml");
         if (defaultStream != null) {
             lang.setDefaults(YamlConfiguration.loadConfiguration(
@@ -56,29 +51,36 @@ public class LangUtil {
         return lang.getString(key, "<red>Missing lang key: " + key + "</red>");
     }
 
-    public Component get(String key, TagResolver... resolvers) {
-        String raw = prefix + getRaw(key);
-        return MM.deserialize(raw, resolvers);
+    /** 获取带前缀的消息，{key} 占位符会被替换 */
+    public Component get(String key, String... kvPairs) {
+        String raw = prefix + replacePairs(getRaw(key), kvPairs);
+        return MM.deserialize(raw);
     }
 
-    public Component getNoPrefix(String key, TagResolver... resolvers) {
-        String raw = getRaw(key);
-        return MM.deserialize(raw, resolvers);
+    /** 获取不带前缀的消息 */
+    public Component getNoPrefix(String key, String... kvPairs) {
+        String raw = replacePairs(getRaw(key), kvPairs);
+        return MM.deserialize(raw);
     }
 
-    public void send(Player player, String key, TagResolver... resolvers) {
-        player.sendMessage(get(key, resolvers));
+    /** 发送带前缀的消息 */
+    public void send(Player player, String key, String... kvPairs) {
+        player.sendMessage(get(key, kvPairs));
     }
 
-    public void sendNoPrefix(Player player, String key, TagResolver... resolvers) {
-        player.sendMessage(getNoPrefix(key, resolvers));
+    /** 发送不带前缀的消息 */
+    public void sendNoPrefix(Player player, String key, String... kvPairs) {
+        player.sendMessage(getNoPrefix(key, kvPairs));
+    }
+
+    private String replacePairs(String raw, String[] kvPairs) {
+        for (int i = 0; i + 1 < kvPairs.length; i += 2) {
+            raw = raw.replace("{" + kvPairs[i] + "}", kvPairs[i + 1]);
+        }
+        return raw;
     }
 
     public static Component parse(String miniMessage) {
         return MM.deserialize(miniMessage);
-    }
-
-    public static TagResolver placeholder(String key, String value) {
-        return Placeholder.unparsed(key, value);
     }
 }
