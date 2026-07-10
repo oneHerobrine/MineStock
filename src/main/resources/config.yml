@@ -1,0 +1,19 @@
+recommended-pool:
+  - "000001"
+  - "600519"
+  - "000858"
+  - "AAPL"
+  - "TSLA"
+  - "MSFT"
+recommended-count: 3
+
+api-cooldown-seconds: 30
+
+price-ratio: 1.0
+
+# 美股 API 配置（按优先级排列，失败自动切换）
+us-stock-apis:
+  - name: finnhub
+    apikey: ""
+  - name: twelvedata
+    apikey: ""

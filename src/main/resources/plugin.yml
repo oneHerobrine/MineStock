@@ -1,0 +1,19 @@
+name: MineStock
+version: '${project.version}'
+main: dev.onelili.mstock.MineStock
+api-version: '1.20'
+load: POSTWORLD
+authors: [ oneLiLi ]
+depend: [ Vault ]
+commands:
+  mstock:
+    description: 股票市场命令
+    usage: /mstock [recommended|<代码>|buy|sell|portfolio]
+    permission: minestock.use
+permissions:
+  minestock.use:
+    description: 允许使用 MineStock 股票市场
+    default: true
+  minestock.admin:
+    description: 允许重载 MineStock 配置
+    default: op
