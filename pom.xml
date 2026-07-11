@@ -6,7 +6,7 @@
 
     <groupId>dev.onelili.mstock</groupId>
     <artifactId>MineStock</artifactId>
-    <version>1.0.5</version>
+    <version>1.0.6</version>
     <packaging>jar</packaging>
 
     <name>MineStock</name>

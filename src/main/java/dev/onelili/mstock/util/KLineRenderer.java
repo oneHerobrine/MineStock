@@ -6,32 +6,23 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Renders K-line close-price data as a continuous line chart for Minecraft chat (MiniMessage).
+ * Simple block bar renderer: each cell is either a solid █ (bar color) or a gray █ (empty placeholder).
  *
- * Column layout: 2*n-1 columns total.
- *   Even columns (0,2,4,...): data point, always '_' at the point's row.
- *   Odd  columns (1,3,5,...): connector between adjacent points i and i+1.
+ * Body  — bar rises from the bottom to the close row using █.
+ * Empty — rows above the bar use a dark-gray █ as placeholder.
  *
- * Connector rules (r0 = row of point i, r1 = row of point i+1):
- *   diff == 0          → '_' at r0 (flat)
- *   diff == 1, up      → '/' at r0  (same row as left '_', connects up-right to next '_')
- *   diff == 1, down    → '\' at r0  (same row as left '_', connects down-right to next '_')
- *   diff >= 2, up      → '/' at r0, '|' at r0+1..r1-1, nothing at r1 (right point's '_' caps it)
- *   diff >= 2, down    → '\' at r0, '|' at r1+1..r0-1, nothing at r1 (right point's '_' caps it)
- *
- * Hover: every non-space cell carries a hover tag.
- *   Point column  → hover shows that point's OHLC.
- *   Connector column → hover shows the RIGHT point's (i+1) OHLC.
- *
- * Color: UP (red #FF5555) when r1 > r0, DOWN (green #55FF55) otherwise.
+ * Axes: │ on left (↑ on top row), └─…─→ on bottom. No Y-axis price labels.
+ * Color: UP (#FF5555) when close >= previous close, DOWN (#55FF55) otherwise.
+ * Hover: every cell carries OHLC detail for that column.
  */
 public class KLineRenderer {
 
     private static final int HEIGHT     = 6;
-    private static final int MAX_POINTS = 20;
-
-    private static final String UP   = "<color:#FF5555>";
-    private static final String DOWN = "<color:#55FF55>";
+    private static final int MAX_POINTS = 30;
+private static final String UP       = "<color:#FF5555>";
+    private static final String DOWN     = "<color:#55FF55>";
+    private static final String DG       = "<dark_gray>";
+    private static final String GRAY_BAR = "<dark_gray>█</dark_gray>";
 
     public static List<String> render(List<KLinePoint> points) {
         if (points == null || points.isEmpty()) return List.of();
@@ -39,105 +30,85 @@ public class KLineRenderer {
         List<KLinePoint> sampled = sample(points, MAX_POINTS);
         int n = sampled.size();
 
-        double globalMax = sampled.stream().mapToDouble(KLinePoint::getClose).max().orElse(1);
-        double globalMin = sampled.stream().mapToDouble(KLinePoint::getClose).min().orElse(0);
+        double globalMax = sampled.stream()
+                .mapToDouble(p -> Math.max(p.getHigh(), p.getClose())).max().orElse(1);
+        double globalMin = sampled.stream()
+                .mapToDouble(p -> Math.min(p.getLow(), p.getClose())).min().orElse(0);
         double range = globalMax - globalMin;
         if (range == 0) range = 1;
 
-        int[] rows = new int[n];
+        int[] slotClose = new int[n];
         for (int i = 0; i < n; i++) {
-            rows[i] = toRow(sampled.get(i).getClose(), globalMin, range);
+            slotClose[i] = toSlot(sampled.get(i).getClose(), globalMin, range);
         }
 
-        int cols = (n == 1) ? 1 : 2 * n - 1;
-
-        // Per-cell: character, color (true=up/red), hover text (null = no hover)
-        char[][]    grid      = new char[HEIGHT][cols];
-        boolean[][] colorUp   = new boolean[HEIGHT][cols];
-        String[][]  cellHover = new String[HEIGHT][cols];
-
-        for (int r = 0; r < HEIGHT; r++)
-            for (int c = 0; c < cols; c++)
-                grid[r][c] = ' ';
-
-        // --- Place data point markers (even columns) ---
+        boolean[] isUp = new boolean[n];
         for (int i = 0; i < n; i++) {
-            int col = i * 2;
-            int row = rows[i];
-            grid[row][col] = '_';
-
-            // Color: direction toward the next point (or from prev if last)
-            boolean up;
-            if (i < n - 1)      up = rows[i + 1] > rows[i];
-            else if (n > 1)     up = rows[i] > rows[i - 1];
-            else                up = false;
-            colorUp[row][col]   = up;
-            cellHover[row][col] = buildHover(sampled.get(i));
-        }
-
-        // --- Place connectors (odd columns) ---
-        for (int i = 0; i < n - 1; i++) {
-            int r0  = rows[i];
-            int r1  = rows[i + 1];
-            int col = i * 2 + 1;
-            boolean up   = r1 > r0;
-            boolean flat = r1 == r0;
-            String  hov  = buildHover(sampled.get(i + 1)); // connector shows right-point data
-
-            if (flat) {
-                place(grid, colorUp, cellHover, r0, col, '_', false, hov);
+            if (i == 0) {
+                isUp[i] = n == 1 || sampled.get(0).getClose() >= sampled.get(1).getClose();
             } else {
-                int diff = Math.abs(r1 - r0);
-                if (diff == 1) {
-                    // '/' or '\' at r0 (left point's row), no fill needed
-                    place(grid, colorUp, cellHover, r0, col, up ? '/' : '\\', up, hov);
-                } else {
-                    // diff >= 2
-                    // Slope char at r0 (left point's row)
-                    place(grid, colorUp, cellHover, r0, col, up ? '/' : '\\', up, hov);
-                    // '|' fill between r0 and r1 (exclusive of both endpoints)
-                    int fillLo = Math.min(r0, r1) + 1;
-                    int fillHi = Math.max(r0, r1) - 1;
-                    for (int r = fillLo; r <= fillHi; r++) {
-                        place(grid, colorUp, cellHover, r, col, '|', up, hov);
-                    }
-                    // r1 row left empty — right point's '_' naturally caps the connector
-                }
+                isUp[i] = sampled.get(i).getClose() >= sampled.get(i - 1).getClose();
             }
         }
 
-        // --- Render rows top to bottom ---
-        List<String> lines = new ArrayList<>(HEIGHT);
+        String[] hovers = new String[n];
+        for (int i = 0; i < n; i++) {
+            hovers[i] = buildHover(sampled.get(i));
+        }
+
+        List<String> lines = new ArrayList<>(HEIGHT + 2);
+
         for (int row = HEIGHT - 1; row >= 0; row--) {
-            StringBuilder sb = new StringBuilder("  ");
+            StringBuilder sb = new StringBuilder();
+            sb.append(DG).append(row == HEIGHT - 1 ? '↑' : '│');
+
             String currentColor = null;
-            for (int col = 0; col < cols; col++) {
-                char ch = grid[row][col];
-                if (ch == ' ') {
-                    currentColor = null;
-                    sb.append(' ');
-                } else {
-                    String color = colorUp[row][col] ? UP : DOWN;
+
+            for (int i = 0; i < n; i++) {
+                boolean filled = row <= slotClose[i];
+                if (filled) {
+                    String color = isUp[i] ? UP : DOWN;
                     if (!color.equals(currentColor)) {
                         sb.append(color);
                         currentColor = color;
                     }
-                    String hov = cellHover[row][col];
-                    if (hov != null) sb.append(hov);
-                    sb.append(ch);
-                    if (hov != null) sb.append("</hover>");
+                    sb.append(hovers[i]).append('█').append("</hover>");
+                } else {
+                    if (currentColor != null) currentColor = null;
+                    sb.append(hovers[i]).append(GRAY_BAR).append("</hover>");
                 }
             }
             lines.add(sb.toString());
         }
+
+        // X axis.
+        lines.add(DG + "└" + "─".repeat(n) + "→");
+
+        String startLabel = formatDate(sampled.getFirst().getDate());
+        String endLabel   = formatDate(sampled.getLast().getDate());
+        lines.add("<gray>" + startLabel + "</gray>"
+                + "<dark_gray> 至 </dark_gray>"
+                + "<gray>" + endLabel + "</gray>"
+                + "<dark_gray> 周期 </dark_gray>"
+                + "<white>" + n + "</white>"
+                + "<dark_gray> 天</dark_gray>");
+
         return lines;
     }
 
-    private static void place(char[][] grid, boolean[][] colorUp, String[][] cellHover,
-                               int row, int col, char ch, boolean up, String hov) {
-        grid[row][col]      = ch;
-        colorUp[row][col]   = up;
-        cellHover[row][col] = hov;
+    private static int toSlot(double price, double globalMin, double range) {
+        int slot = (int) Math.round((price - globalMin) / range * (HEIGHT - 1));
+        return Math.max(0, Math.min(HEIGHT - 1, slot));
+    }
+
+    private static String formatDate(String date) {
+        if (date != null && date.length() == 10 && date.charAt(4) == '-') {
+            // "2025-05-29" → "5月29日"
+            int month = Integer.parseInt(date.substring(5, 7));
+            int day   = Integer.parseInt(date.substring(8, 10));
+            return month + "月" + day + "日";
+        }
+        return date != null ? date : "";
     }
 
     private static String buildHover(KLinePoint p) {
@@ -151,12 +122,6 @@ public class KLineRenderer {
 
     private static String fmt(double v) {
         return String.format("%.2f", v);
-    }
-
-    private static int toRow(double price, double min, double range) {
-        double normalized = (price - min) / range;
-        int row = (int) Math.round(normalized * (HEIGHT - 1));
-        return Math.max(0, Math.min(HEIGHT - 1, row));
     }
 
     private static List<KLinePoint> sample(List<KLinePoint> points, int maxCount) {
