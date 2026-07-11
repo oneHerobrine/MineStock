@@ -5,92 +5,117 @@ import dev.onelili.mstock.model.KLinePoint;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Renders K-line data as a slash/backslash/underscore line chart suitable for
+ * Minecraft chat (MiniMessage format).
+ *
+ * Chart characters:
+ *   /  rising segment
+ *   \  falling segment
+ *   _  flat segment — drawn one row ABOVE its logical row because the underscore
+ *      glyph sits at the bottom of its cell and appears disconnected otherwise.
+ *
+ * Color: rising segments red (#FF5555), falling/flat segments green (#55FF55).
+ * Each data point occupies 2 character columns (char + space), up to MAX_POINTS
+ * points displayed. Excess points are uniformly sampled.
+ */
 public class KLineRenderer {
 
-    private static final int HEIGHT = 6;
-    private static final int MAX_CANDLES = 20;
-    // MiniMessage color tags for rising (red in CN stock convention) and falling (green)
-    private static final String COLOR_UP = "<color:#FF5555>";
-    private static final String COLOR_DOWN = "<color:#55FF55>";
-    private static final String COLOR_RESET = "</color>";
-    private static final String COLOR_WICK = "<gray>";
-    private static final String COLOR_WICK_RESET = "</gray>";
+    private static final int HEIGHT = 5;      // visible rows in chart
+    private static final int MAX_POINTS = 24; // max data points → 48 chars wide
+
+    private static final String UP   = "<color:#FF5555>";
+    private static final String DOWN = "<color:#55FF55>";
+    private static final String END  = "</color>";
 
     /**
-     * Renders a list of KLinePoints into HEIGHT lines of MiniMessage text.
-     * Each candle occupies 2 chars (body + space), max 20 candles in 40 chars.
+     * Returns HEIGHT lines of MiniMessage text representing the price trend.
      * Returns an empty list if points is null or empty.
      */
     public static List<String> render(List<KLinePoint> points) {
         if (points == null || points.isEmpty()) return List.of();
 
-        // Sample down to MAX_CANDLES if needed
-        List<KLinePoint> sampled = sample(points, MAX_CANDLES);
+        List<KLinePoint> sampled = sample(points, MAX_POINTS);
         int n = sampled.size();
 
-        // Find global price range
-        double globalMax = sampled.stream().mapToDouble(KLinePoint::getHigh).max().orElse(1);
-        double globalMin = sampled.stream().mapToDouble(KLinePoint::getLow).min().orElse(0);
+        // Map each close price to a row index: 0 = bottom, HEIGHT-1 = top
+        double globalMax = sampled.stream().mapToDouble(KLinePoint::getClose).max().orElse(1);
+        double globalMin = sampled.stream().mapToDouble(KLinePoint::getClose).min().orElse(0);
         double range = globalMax - globalMin;
         if (range == 0) range = 1;
 
-        // For each candle pre-compute row ranges (0=bottom, HEIGHT-1=top)
-        int[] bodyTop = new int[n];
-        int[] bodyBot = new int[n];
-        int[] wickTop = new int[n];
-        int[] wickBot = new int[n];
-        boolean[] isUp = new boolean[n];
-
+        int[] rows = new int[n];
         for (int i = 0; i < n; i++) {
-            KLinePoint p = sampled.get(i);
-            isUp[i] = p.getClose() >= p.getOpen();
-            bodyTop[i] = toRow(Math.max(p.getOpen(), p.getClose()), globalMin, range);
-            bodyBot[i] = toRow(Math.min(p.getOpen(), p.getClose()), globalMin, range);
-            wickTop[i] = toRow(p.getHigh(), globalMin, range);
-            wickBot[i] = toRow(p.getLow(), globalMin, range);
+            rows[i] = toRow(sampled.get(i).getClose(), globalMin, range);
         }
 
+        // Grid: grid[row][col], rows indexed 0..HEIGHT-1 (0=bottom, HEIGHT-1=top)
+        // Each point uses 2 columns: the segment character + a space.
+        // Between point i and i+1 we draw one segment character at column i*2.
+        // We have (n-1) segments, so we need 2*(n-1)+1 columns minimum.
+        // For a single point we still render one column.
+        int cols = Math.max(1, 2 * n - 1);
+        char[][]   grid  = new char[HEIGHT][cols];
+        boolean[][] isUp = new boolean[HEIGHT][cols];
+        for (int r = 0; r < HEIGHT; r++) {
+            for (int c = 0; c < cols; c++) {
+                grid[r][c] = ' ';
+            }
+        }
+
+        for (int i = 0; i < n - 1; i++) {
+            int col = i * 2;          // segment at even column
+            int r0  = rows[i];
+            int r1  = rows[i + 1];
+            boolean up = r1 > r0;
+            boolean flat = r1 == r0;
+
+            if (flat) {
+                // Underscore displayed one row HIGHER to look connected
+                int drawRow = Math.min(r0 + 1, HEIGHT - 1);
+                grid[drawRow][col]  = '_';
+                isUp[drawRow][col]  = false;
+            } else if (up) {
+                // '/' drawn at the starting (lower) row
+                grid[r0][col] = '/';
+                isUp[r0][col] = true;
+            } else {
+                // '\' drawn at the starting (higher) row
+                grid[r0][col] = '\\';
+                isUp[r0][col] = false;
+            }
+        }
+
+        // Also mark the last point's column if it's the only point
+        if (n == 1) {
+            int drawRow = Math.min(rows[0] + 1, HEIGHT - 1);
+            grid[drawRow][0] = '_';
+        }
+
+        // Build MiniMessage lines from top to bottom
         List<String> lines = new ArrayList<>(HEIGHT);
-        // Build from top row (HEIGHT-1) down to row 0
         for (int row = HEIGHT - 1; row >= 0; row--) {
             StringBuilder sb = new StringBuilder("  ");
-            for (int i = 0; i < n; i++) {
-                char ch = ' ';
-                String colorOpen = "";
-                String colorClose = "";
-
-                if (row >= bodyBot[i] && row <= bodyTop[i]) {
-                    // body
-                    ch = '█';
-                    colorOpen = isUp[i] ? COLOR_UP : COLOR_DOWN;
-                    colorClose = COLOR_RESET;
-                } else if (row >= wickBot[i] && row <= wickTop[i]) {
-                    // wick
-                    ch = '│';
-                    colorOpen = COLOR_WICK;
-                    colorClose = COLOR_WICK_RESET;
-                }
-
-                if (ch != ' ') {
-                    sb.append(colorOpen).append(ch).append(colorClose);
-                } else {
+            for (int col = 0; col < cols; col++) {
+                char ch = grid[row][col];
+                if (ch == ' ') {
                     sb.append(' ');
+                } else {
+                    String color = isUp[row][col] ? UP : DOWN;
+                    sb.append(color).append(ch).append(END);
                 }
-                sb.append(' '); // spacing between candles
             }
             lines.add(sb.toString());
         }
         return lines;
     }
 
-    /** Maps a price value to a row index in [0, HEIGHT-1]. */
     private static int toRow(double price, double min, double range) {
         double normalized = (price - min) / range;
         int row = (int) Math.round(normalized * (HEIGHT - 1));
         return Math.max(0, Math.min(HEIGHT - 1, row));
     }
 
-    /** Uniformly samples the list down to at most maxCount elements. */
     private static List<KLinePoint> sample(List<KLinePoint> points, int maxCount) {
         if (points.size() <= maxCount) return points;
         List<KLinePoint> result = new ArrayList<>(maxCount);

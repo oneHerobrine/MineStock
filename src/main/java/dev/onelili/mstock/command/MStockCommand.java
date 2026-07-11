@@ -185,30 +185,14 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
 
         lang.send(player, "api-fetching", "code", code);
 
-        api.fetch(code).thenAccept(info -> {
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                lang.sendNoPrefix(player, "stock-header",
-                        "name", info.getName(),
-                        "code", info.getCode());
+        // Fetch real-time price and default 30-day K-line in parallel, render together
+        CompletableFuture<StockInfo> priceFuture = api.fetch(code);
+        CompletableFuture<List<KLinePoint>> klineFuture = api.fetchKLine(code, 30);
 
-                String priceKey = info.getChangePercent() >= 0 ? "stock-price-up" : "stock-price-down";
-                lang.sendNoPrefix(player, priceKey,
-                        "price", df.format(info.getPrice() * config.getPriceRatio()),
-                        "change", df.format(Math.abs(info.getChangePercent())));
-
-                lang.sendNoPrefix(player, "stock-actions", "code", code);
-
-                // Show default 30-day K-line below the actions
-                lang.sendNoPrefix(player, "kline-loading");
-                api.fetchKLine(code, 30).thenAccept(points ->
-                        plugin.getServer().getScheduler().runTask(plugin, () ->
-                                renderKLineSection(player, code, 30, points))
-                ).exceptionally(ex -> {
-                    plugin.getServer().getScheduler().runTask(plugin, () ->
-                            lang.sendNoPrefix(player, "kline-error"));
-                    return null;
-                });
-            });
+        priceFuture.thenCombine(klineFuture, (info, points) -> {
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                    renderFullDetail(player, code, info, points, 30));
+            return null;
         }).exceptionally(ex -> {
             plugin.getServer().getScheduler().runTask(plugin, () ->
                     lang.send(player, "api-error"));
@@ -251,7 +235,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         showKLine(player, code, days);
     }
 
-    /** Called by _kline command and after custom-days input. Checks cooldown then fetches+renders. */
+    /** Called by _kline command and after custom-days input. Checks cooldown then fetches+renders the full detail page. */
     private void showKLine(Player player, String code, int days) {
         if (days < 1 || days > 365) return;
         if (checkCooldown(player)) return;
@@ -259,13 +243,18 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
             lang.send(player, "unsupported-code", "code", code);
             return;
         }
-        lang.sendNoPrefix(player, "kline-loading");
-        api.fetchKLine(code, days).thenAccept(points ->
-                plugin.getServer().getScheduler().runTask(plugin, () ->
-                        renderKLineSection(player, code, days, points))
-        ).exceptionally(ex -> {
+        lang.send(player, "api-fetching", "code", code);
+
+        CompletableFuture<StockInfo> priceFuture = api.fetch(code);
+        CompletableFuture<List<KLinePoint>> klineFuture = api.fetchKLine(code, days);
+
+        priceFuture.thenCombine(klineFuture, (info, points) -> {
             plugin.getServer().getScheduler().runTask(plugin, () ->
-                    lang.sendNoPrefix(player, "kline-error"));
+                    renderFullDetail(player, code, info, points, days));
+            return null;
+        }).exceptionally(ex -> {
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                    lang.send(player, "api-error"));
             return null;
         });
     }
@@ -276,16 +265,39 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     }
 
     /**
-     * Sends K-line chart rows + period bar for the given days selection.
+     * Renders the complete stock detail page in one shot. Order:
+     *   1. stock-header (name + code)
+     *   2. stock-price (price + change%)
+     *   3. K-line chart rows
+     *   4. current period label + period selector buttons
+     *   5. buy / sell action buttons
      * Must be called on the main thread.
      */
-    private void renderKLineSection(Player player, String code, int days, List<KLinePoint> points) {
+    private void renderFullDetail(Player player, String code, StockInfo info,
+                                  List<KLinePoint> points, int days) {
+        // 1. Header
+        lang.sendNoPrefix(player, "stock-header",
+                "name", info.getName(),
+                "code", info.getCode());
+
+        // 2. Price
+        String priceKey = info.getChangePercent() >= 0 ? "stock-price-up" : "stock-price-down";
+        lang.sendNoPrefix(player, priceKey,
+                "price", df.format(info.getPrice() * config.getPriceRatio()),
+                "change", df.format(Math.abs(info.getChangePercent())));
+
+        // 3. K-line chart
         List<String> chartLines = KLineRenderer.render(points);
         for (String line : chartLines) {
             player.sendMessage(LangUtil.parse(line));
         }
+
+        // 4. Period label + selector
         lang.sendNoPrefix(player, "kline-current-period", "days", String.valueOf(days));
         player.sendMessage(LangUtil.parse(buildPeriodBar(code, days)));
+
+        // 5. Buy / sell
+        lang.sendNoPrefix(player, "stock-actions", "code", code);
     }
 
     /**
