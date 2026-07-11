@@ -8,15 +8,22 @@ import java.util.List;
 /**
  * Renders K-line close-price data as a continuous line chart for Minecraft chat (MiniMessage).
  *
- * Layout: 2*n-1 columns total.
- *   Even columns (0,2,4,...): data point — '_' when same row as neighbour(s), or row marker for '|' fill
- *   Odd  columns (1,3,5,...): connector between adjacent points
- *     diff == 0 : '_' at shared row
- *     diff == 1 : '/' or '\' at the transition row
- *     diff >= 2 : '/' or '\' at the ends + '|' filling the intermediate rows
+ * Column layout: 2*n-1 columns total.
+ *   Even columns (0,2,4,...): data point, always '_' at the point's row.
+ *   Odd  columns (1,3,5,...): connector between adjacent points i and i+1.
  *
- * The point character on its own column is always '_', wrapped in a hover showing OHLC detail.
- * Color: rising = red (#FF5555), falling/flat = green (#55FF55).
+ * Connector rules (r0 = row of point i, r1 = row of point i+1):
+ *   diff == 0          → '_' at r0 (flat)
+ *   diff == 1, up      → '/' at r0  (same row as left '_', connects up-right to next '_')
+ *   diff == 1, down    → '\' at r0  (same row as left '_', connects down-right to next '_')
+ *   diff >= 2, up      → '/' at r0, '|' at r0+1..r1-1, nothing at r1 (right point's '_' caps it)
+ *   diff >= 2, down    → '\' at r0, '|' at r1+1..r0-1, nothing at r1 (right point's '_' caps it)
+ *
+ * Hover: every non-space cell carries a hover tag.
+ *   Point column  → hover shows that point's OHLC.
+ *   Connector column → hover shows the RIGHT point's (i+1) OHLC.
+ *
+ * Color: UP (red #FF5555) when r1 > r0, DOWN (green #55FF55) otherwise.
  */
 public class KLineRenderer {
 
@@ -42,87 +49,59 @@ public class KLineRenderer {
             rows[i] = toRow(sampled.get(i).getClose(), globalMin, range);
         }
 
-        // grid[row][col]: the character to draw (' ' = empty)
-        // colorUp[row][col]: true = red (rising), false = green (falling/flat)
-        // hoverText[col]: non-null only for point columns (even cols), contains MiniMessage hover text
-        int cols = 2 * n - 1;
-        char[][]    grid     = new char[HEIGHT][cols];
-        boolean[][] colorUp  = new boolean[HEIGHT][cols];
-        String[]    hover    = new String[cols];
+        int cols = (n == 1) ? 1 : 2 * n - 1;
+
+        // Per-cell: character, color (true=up/red), hover text (null = no hover)
+        char[][]    grid      = new char[HEIGHT][cols];
+        boolean[][] colorUp   = new boolean[HEIGHT][cols];
+        String[][]  cellHover = new String[HEIGHT][cols];
 
         for (int r = 0; r < HEIGHT; r++)
             for (int c = 0; c < cols; c++)
                 grid[r][c] = ' ';
 
-        // --- Place point markers (even columns) ---
+        // --- Place data point markers (even columns) ---
         for (int i = 0; i < n; i++) {
             int col = i * 2;
             int row = rows[i];
             grid[row][col] = '_';
-            // Determine color: compare with previous point (or next if first)
-            boolean up = false;
-            if (i > 0)          up = rows[i] > rows[i - 1];
-            else if (n > 1)     up = rows[0] < rows[1]; // first point: look ahead (reversed: rising means next is higher)
-            colorUp[row][col] = up;
 
-            // Build hover text for this point
-            KLinePoint p = sampled.get(i);
-            hover[col] = buildHover(p);
+            // Color: direction toward the next point (or from prev if last)
+            boolean up;
+            if (i < n - 1)      up = rows[i + 1] > rows[i];
+            else if (n > 1)     up = rows[i] > rows[i - 1];
+            else                up = false;
+            colorUp[row][col]   = up;
+            cellHover[row][col] = buildHover(sampled.get(i));
         }
 
         // --- Place connectors (odd columns) ---
         for (int i = 0; i < n - 1; i++) {
             int r0  = rows[i];
             int r1  = rows[i + 1];
-            int col = i * 2 + 1; // connector column
-            boolean up = r1 > r0;
+            int col = i * 2 + 1;
+            boolean up   = r1 > r0;
             boolean flat = r1 == r0;
+            String  hov  = buildHover(sampled.get(i + 1)); // connector shows right-point data
 
             if (flat) {
-                // Same row: draw '_' at that row
-                grid[r0][col]    = '_';
-                colorUp[r0][col] = false;
+                place(grid, colorUp, cellHover, r0, col, '_', false, hov);
             } else {
                 int diff = Math.abs(r1 - r0);
-                int lo = Math.min(r0, r1);
-                int hi = Math.max(r0, r1);
-
                 if (diff == 1) {
-                    // Single transition character: '/' sits at lo row, '\' sits at hi row
-                    // Actually: '/' visually goes from lo-left to hi-right → draw at lo
-                    //           '\' visually goes from hi-left to lo-right → draw at hi
-                    if (up) {
-                        // going up: left point is lower (r0=lo), right point is higher (r1=hi)
-                        grid[lo][col]    = '/';
-                        colorUp[lo][col] = true;
-                    } else {
-                        // going down: left point is higher (r0=hi), right point is lower (r1=lo)
-                        grid[hi][col]    = '\\';
-                        colorUp[hi][col] = false;
-                    }
+                    // '/' or '\' at r0 (left point's row), no fill needed
+                    place(grid, colorUp, cellHover, r0, col, up ? '/' : '\\', up, hov);
                 } else {
-                    // diff >= 2: fill intermediate rows with '|', cap with '/' or '\'
-                    // Fill rows lo+1 .. hi-1 with '|'
-                    for (int r = lo + 1; r <= hi - 1; r++) {
-                        grid[r][col]    = '|';
-                        colorUp[r][col] = up;
+                    // diff >= 2
+                    // Slope char at r0 (left point's row)
+                    place(grid, colorUp, cellHover, r0, col, up ? '/' : '\\', up, hov);
+                    // '|' fill between r0 and r1 (exclusive of both endpoints)
+                    int fillLo = Math.min(r0, r1) + 1;
+                    int fillHi = Math.max(r0, r1) - 1;
+                    for (int r = fillLo; r <= fillHi; r++) {
+                        place(grid, colorUp, cellHover, r, col, '|', up, hov);
                     }
-                    // Cap characters at the endpoints
-                    if (up) {
-                        // bottom cap: '/' at lo (connecting from left-low to right-high)
-                        grid[lo][col]    = '/';
-                        colorUp[lo][col] = true;
-                        // top cap: '/' at hi as well (or omit — the | already reaches hi-1,
-                        // and the point '_' at hi covers the top)
-                        // Replace bottom of | with '/' and top of | with '/' too for clarity:
-                        grid[hi][col]    = '/';
-                        colorUp[hi][col] = true;
-                    } else {
-                        grid[hi][col]    = '\\';
-                        colorUp[hi][col] = false;
-                        grid[lo][col]    = '\\';
-                        colorUp[lo][col] = false;
-                    }
+                    // r1 row left empty — right point's '_' naturally caps the connector
                 }
             }
         }
@@ -139,14 +118,14 @@ public class KLineRenderer {
                     sb.append(' ');
                 } else {
                     String color = colorUp[row][col] ? UP : DOWN;
-                    String hoverOpen  = hover[col] != null ? hover[col] : "";
-                    String hoverClose = hover[col] != null ? "</hover>" : "";
-
                     if (!color.equals(currentColor)) {
                         sb.append(color);
                         currentColor = color;
                     }
-                    sb.append(hoverOpen).append(ch).append(hoverClose);
+                    String hov = cellHover[row][col];
+                    if (hov != null) sb.append(hov);
+                    sb.append(ch);
+                    if (hov != null) sb.append("</hover>");
                 }
             }
             lines.add(sb.toString());
@@ -154,19 +133,24 @@ public class KLineRenderer {
         return lines;
     }
 
+    private static void place(char[][] grid, boolean[][] colorUp, String[][] cellHover,
+                               int row, int col, char ch, boolean up, String hov) {
+        grid[row][col]      = ch;
+        colorUp[row][col]   = up;
+        cellHover[row][col] = hov;
+    }
+
     private static String buildHover(KLinePoint p) {
         return "<hover:show_text:'<gray>" + p.getDate()
-                + "\n<white>开: " + fmt(p.getOpen())
-                + " 高: " + fmt(p.getHigh())
-                + "\n<white>低: " + fmt(p.getLow())
-                + " 收: " + fmt(p.getClose())
+                + "<newline><white>开: " + fmt(p.getOpen())
+                + "  高: " + fmt(p.getHigh())
+                + "<newline>低: " + fmt(p.getLow())
+                + "  收: " + fmt(p.getClose())
                 + "</white></gray>'>";
     }
 
     private static String fmt(double v) {
-        // Strip trailing zeros but keep at least 2 decimal places
-        String s = String.format("%.2f", v);
-        return s;
+        return String.format("%.2f", v);
     }
 
     private static int toRow(double price, double min, double range) {
