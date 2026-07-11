@@ -1,9 +1,11 @@
 package dev.onelili.mstock.api;
 
 import dev.onelili.mstock.config.MainConfig;
+import dev.onelili.mstock.model.KLinePoint;
 import dev.onelili.mstock.model.StockInfo;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -12,6 +14,10 @@ import java.util.logging.Logger;
 public class StockApiService {
     private final List<StockSource> sources = new ArrayList<>();
     private final Logger logger;
+
+    // K-line cache: key = "CODE:days", value = cached result + timestamp
+    private final Map<String, KLineCacheEntry> klineCache = new HashMap<>();
+    private long klineCacheMs = 300_000L; // 5 minutes default
 
     public StockApiService(MainConfig config, Logger logger) {
         this.logger = logger;
@@ -27,6 +33,9 @@ public class StockApiService {
             else if ("twelvedata".equalsIgnoreCase(name)) twelveDataKey = key;
         }
         sources.add(new UsStockApi(logger, finnhubKey, twelveDataKey));
+
+        long cfgCacheMs = config.getKlineCacheMs();
+        if (cfgCacheMs > 0) klineCacheMs = cfgCacheMs;
     }
 
     public CompletableFuture<StockInfo> fetch(String code) {
@@ -37,7 +46,39 @@ public class StockApiService {
                 new UnsupportedOperationException("Unsupported stock code: " + code));
     }
 
+    public CompletableFuture<List<KLinePoint>> fetchKLine(String code, int days) {
+        String cacheKey = code + ":" + days;
+        KLineCacheEntry cached = klineCache.get(cacheKey);
+        if (cached != null && !cached.isExpired(klineCacheMs)) {
+            return CompletableFuture.completedFuture(cached.data);
+        }
+        for (StockSource source : sources) {
+            if (source.supports(code)) {
+                return source.fetchKLine(code, days).thenApply(data -> {
+                    klineCache.put(cacheKey, new KLineCacheEntry(data));
+                    return data;
+                });
+            }
+        }
+        return CompletableFuture.failedFuture(
+                new UnsupportedOperationException("Unsupported stock code for K-line: " + code));
+    }
+
     public boolean isSupported(String code) {
         return sources.stream().anyMatch(s -> s.supports(code));
+    }
+
+    private static class KLineCacheEntry {
+        final List<KLinePoint> data;
+        final long timestamp;
+
+        KLineCacheEntry(List<KLinePoint> data) {
+            this.data = data;
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        boolean isExpired(long ttlMs) {
+            return System.currentTimeMillis() - timestamp > ttlMs;
+        }
     }
 }

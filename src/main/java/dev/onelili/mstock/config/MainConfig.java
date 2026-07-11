@@ -56,4 +56,8 @@ public class MainConfig {
         }
         return list;
     }
+
+    public long getKlineCacheMs() {
+        return cfg().getLong("kline-cache-ms", 300_000L);
+    }
 }

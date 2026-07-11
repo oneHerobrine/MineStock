@@ -6,9 +6,11 @@ import dev.onelili.mstock.config.MainConfig;
 import dev.onelili.mstock.database.HoldingRepository;
 import dev.onelili.mstock.economy.EconomyService;
 import dev.onelili.mstock.model.Holding;
+import dev.onelili.mstock.model.KLinePoint;
 import dev.onelili.mstock.model.StockInfo;
 import dev.onelili.mstock.ui.ChatInputSession;
 import dev.onelili.mstock.ui.PendingAction;
+import dev.onelili.mstock.util.KLineRenderer;
 import dev.onelili.mstock.util.LangUtil;
 import net.kyori.adventure.text.Component;
 import org.bukkit.command.Command;
@@ -108,6 +110,20 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                     initSell(player, args[1].toUpperCase());
                 }
             }
+            case "_kline" -> {
+                // _kline <code> <days>
+                if (args.length == 3) {
+                    try {
+                        int days = Integer.parseInt(args[2]);
+                        showKLine(player, args[1].toUpperCase(), days);
+                    } catch (NumberFormatException ignored) { }
+                }
+            }
+            case "_kline_custom_init" -> {
+                if (args.length == 2) {
+                    initKlineCustom(player, args[1].toUpperCase());
+                }
+            }
             default -> {
                 String code = args[0].toUpperCase();
                 if (api.isSupported(code)) {
@@ -181,6 +197,17 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                         "change", df.format(Math.abs(info.getChangePercent())));
 
                 lang.sendNoPrefix(player, "stock-actions", "code", code);
+
+                // Show default 30-day K-line below the actions
+                lang.sendNoPrefix(player, "kline-loading");
+                api.fetchKLine(code, 30).thenAccept(points ->
+                        plugin.getServer().getScheduler().runTask(plugin, () ->
+                                renderKLineSection(player, code, 30, points))
+                ).exceptionally(ex -> {
+                    plugin.getServer().getScheduler().runTask(plugin, () ->
+                            lang.sendNoPrefix(player, "kline-error"));
+                    return null;
+                });
             });
         }).exceptionally(ex -> {
             plugin.getServer().getScheduler().runTask(plugin, () ->
@@ -219,9 +246,85 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         });
     }
 
+    /** Public accessor for ChatInputListener to call after custom-days input is validated. */
+    public void showKLinePublic(Player player, String code, int days) {
+        showKLine(player, code, days);
+    }
+
+    /** Called by _kline command and after custom-days input. Checks cooldown then fetches+renders. */
+    private void showKLine(Player player, String code, int days) {
+        if (days < 1 || days > 365) return;
+        if (checkCooldown(player)) return;
+        if (!api.isSupported(code)) {
+            lang.send(player, "unsupported-code", "code", code);
+            return;
+        }
+        lang.sendNoPrefix(player, "kline-loading");
+        api.fetchKLine(code, days).thenAccept(points ->
+                plugin.getServer().getScheduler().runTask(plugin, () ->
+                        renderKLineSection(player, code, days, points))
+        ).exceptionally(ex -> {
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                    lang.sendNoPrefix(player, "kline-error"));
+            return null;
+        });
+    }
+
+    private void initKlineCustom(Player player, String code) {
+        session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.KLINE_CUSTOM, code));
+        lang.send(player, "kline-custom-prompt", "code", code);
+    }
+
+    /**
+     * Sends K-line chart rows + period bar for the given days selection.
+     * Must be called on the main thread.
+     */
+    private void renderKLineSection(Player player, String code, int days, List<KLinePoint> points) {
+        List<String> chartLines = KLineRenderer.render(points);
+        for (String line : chartLines) {
+            player.sendMessage(LangUtil.parse(line));
+        }
+        lang.sendNoPrefix(player, "kline-current-period", "days", String.valueOf(days));
+        player.sendMessage(LangUtil.parse(buildPeriodBar(code, days)));
+    }
+
+    /**
+     * Builds the period selector bar as a MiniMessage string.
+     * Selected period is green (no click), others are gray with click+hover.
+     */
+    private String buildPeriodBar(String code, int selectedDays) {
+        int[] presetDays = {30, 90, 365};
+        String[] presetLabels = {"1月", "3月", "1年"};
+
+        StringBuilder sb = new StringBuilder("  ");
+        for (int i = 0; i < presetDays.length; i++) {
+            int d = presetDays[i];
+            String label = presetLabels[i];
+            if (d == selectedDays) {
+                sb.append("<green>[ ").append(label).append(" ]</green>");
+            } else {
+                sb.append("<gray><click:run_command:'/mstock _kline ").append(code).append(" ").append(d).append("'>")
+                  .append("<hover:show_text:'<gray>查看 ").append(label).append(" K线</gray>'>")
+                  .append("[ ").append(label).append(" ]")
+                  .append("</hover></click></gray>");
+            }
+            sb.append("  ");
+        }
+
+        boolean isCustom = (selectedDays != 30 && selectedDays != 90 && selectedDays != 365);
+        if (isCustom) {
+            sb.append("<green>[ 自定义 ]</green>");
+        } else {
+            sb.append("<gray><click:run_command:'/mstock _kline_custom_init ").append(code).append("'>")
+              .append("<hover:show_text:'<gray>自定义天数（1-365）</gray>'>")
+              .append("[ 自定义 ]")
+              .append("</hover></click></gray>");
+        }
+        return sb.toString();
+    }
+
     private void initBuy(Player player, String code) {
         session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.BUY, code));
-        // sendNoPrefix 避免双重前缀（buy-prompt 已在 lang.yml 中不含前缀）
         lang.send(player, "buy-prompt", "code", code);
     }
 

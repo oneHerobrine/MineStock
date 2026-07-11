@@ -12,6 +12,9 @@ api-cooldown-ms: 1000
 
 price-ratio: 1.0
 
+# K线数据缓存时间（毫秒），默认 5 分钟
+kline-cache-ms: 300000
+
 # 美股 API 配置（按优先级排列，失败自动切换）
 us-stock-apis:
   - name: finnhub
