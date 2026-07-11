@@ -3,6 +3,7 @@ package dev.onelili.mstock.listener;
 import dev.onelili.mstock.MineStock;
 import dev.onelili.mstock.ui.ChatInputSession;
 import dev.onelili.mstock.ui.PendingAction;
+import dev.onelili.mstock.util.LangUtil;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -42,15 +43,11 @@ public class ChatInputListener implements Listener {
             return;
         }
 
-        session.clearSession(player.getUniqueId());
+        // Store the amount and move the session to the confirm-waiting stage.
+        action.setAmount(amount);
 
-        // 在主线程执行命令
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
-            if (action.getType() == PendingAction.Type.BUY) {
-                plugin.getCommandExecutor().executeBuy(player, action.getStockCode(), amount);
-            } else {
-                plugin.getCommandExecutor().executeSell(player, action.getStockCode(), amount);
-            }
-        });
+        // Fetch price on async thread (we are already async here), then send the confirm preview on main thread.
+        plugin.getServer().getScheduler().runTask(plugin, () ->
+                plugin.getCommandExecutor().showTradeConfirm(player, action));
     }
 }

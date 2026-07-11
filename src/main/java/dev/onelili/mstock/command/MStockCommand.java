@@ -112,6 +112,44 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                     initSell(player, args[1].toUpperCase());
                 }
             }
+            case "_cancel_confirm" -> {
+                PendingAction pending = session.getSession(player.getUniqueId());
+                if (pending != null && pending.isAwaitingConfirm()) {
+                    session.clearSession(player.getUniqueId());
+                    lang.send(player, "input-cancelled");
+                }
+            }
+            case "_buy_confirm" -> {
+                // /mstock _buy_confirm <code> <amount>
+                if (args.length == 3) {
+                    try {
+                        int amount = Integer.parseInt(args[2]);
+                        // Only honour if there is a matching session awaiting confirm
+                        PendingAction action = session.getSession(player.getUniqueId());
+                        if (action != null && action.getType() == PendingAction.Type.BUY
+                                && action.getStockCode().equals(args[1].toUpperCase())
+                                && action.isAwaitingConfirm()) {
+                            session.clearSession(player.getUniqueId());
+                            executeBuy(player, args[1].toUpperCase(), amount);
+                        }
+                    } catch (NumberFormatException ignored) { }
+                }
+            }
+            case "_sell_confirm" -> {
+                // /mstock _sell_confirm <code> <amount>
+                if (args.length == 3) {
+                    try {
+                        int amount = Integer.parseInt(args[2]);
+                        PendingAction action = session.getSession(player.getUniqueId());
+                        if (action != null && action.getType() == PendingAction.Type.SELL
+                                && action.getStockCode().equals(args[1].toUpperCase())
+                                && action.isAwaitingConfirm()) {
+                            session.clearSession(player.getUniqueId());
+                            executeSell(player, args[1].toUpperCase(), amount);
+                        }
+                    } catch (NumberFormatException ignored) { }
+                }
+            }
             case "_kline" -> {
                 // _kline <code> <days>
                 if (args.length == 3) {
@@ -263,28 +301,25 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
      */
     private void renderFullDetail(Player player, String code, StockInfo info,
                                   List<KLinePoint> points, int days) {
-        // 1. Header
-        lang.sendNoPrefix(player, "stock-header",
-                "name", info.getName(),
-                "code", info.getCode());
-
-        // 2. Price
-        String priceKey = info.getChangePercent() >= 0 ? "stock-price-up" : "stock-price-down";
-        lang.sendNoPrefix(player, priceKey,
-                "price", df.format(info.getPrice() * config.getPriceRatio()),
+        // 1. Header + price on one line
+        String headerKey = info.getChangePercent() >= 0 ? "stock-header-up" : "stock-header-down";
+        lang.sendNoPrefix(player, headerKey,
+                "name",   info.getName(),
+                "code",   info.getCode(),
+                "price",  df.format(info.getPrice() * config.getPriceRatio()),
                 "change", df.format(Math.abs(info.getChangePercent())));
 
-        // 3. K-line chart
+        // 2. K-line chart
         List<String> chartLines = KLineRenderer.render(points);
         for (String line : chartLines) {
             player.sendMessage(LangUtil.parse(line));
         }
 
-        // 4. Period label + selector
+        // 3. Period label + selector
         lang.sendNoPrefix(player, "kline-current-period", "days", String.valueOf(days));
         player.sendMessage(LangUtil.parse(buildPeriodBar(code, days)));
 
-        // 5. Buy / sell
+        // 4. Buy / sell
         lang.sendNoPrefix(player, "stock-actions", "code", code);
     }
 
@@ -313,14 +348,99 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         return sb.toString();
     }
 
+    /** Starts a buy session: fetch the current price first, then send the prompt with price info. */
     private void initBuy(Player player, String code) {
-        session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.BUY, code));
-        lang.send(player, "buy-prompt", "code", code);
+        lang.send(player, "api-fetching", "code", code);
+        api.fetch(code).thenAccept(info -> {
+            double unitPrice = round2(info.getPrice() * config.getPriceRatio());
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.BUY, code));
+                lang.send(player, "buy-prompt",
+                        "code", code,
+                        "price", df.format(unitPrice));
+            });
+        }).exceptionally(ex -> {
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                    lang.send(player, "api-error"));
+            return null;
+        });
     }
 
+    /** Starts a sell session: fetch the current price first, then send the prompt with price info. */
     private void initSell(Player player, String code) {
-        session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.SELL, code));
-        lang.send(player, "sell-prompt", "code", code);
+        lang.send(player, "api-fetching", "code", code);
+        api.fetch(code).thenAccept(info -> {
+            double unitPrice = round2(info.getPrice() * config.getPriceRatio());
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.SELL, code));
+                lang.send(player, "sell-prompt",
+                        "code", code,
+                        "price", df.format(unitPrice));
+            });
+        }).exceptionally(ex -> {
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                    lang.send(player, "api-error"));
+            return null;
+        });
+    }
+
+    /**
+     * Called from ChatInputListener after the player types an amount.
+     * Fetches the latest price, shows the trade preview with confirm/cancel buttons,
+     * and keeps the session alive waiting for the player to click confirm.
+     * Must be called on the main thread.
+     */
+    public void showTradeConfirm(Player player, PendingAction action) {
+        String code = action.getStockCode();
+        int amount = action.getAmount();
+        boolean isBuy = action.getType() == PendingAction.Type.BUY;
+
+        lang.send(player, "api-fetching", "code", code);
+
+        api.fetch(code).thenAccept(info -> {
+            double unitPrice = round2(info.getPrice() * config.getPriceRatio());
+            double subtotal  = round2(unitPrice * amount);
+            double fee       = calcFee(subtotal);
+
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                if (isBuy) {
+                    double total = round2(subtotal + fee);
+                    lang.sendNoPrefix(player, "buy-confirm",
+                            "unit_price", df.format(unitPrice),
+                            "amount",     String.valueOf(amount),
+                            "subtotal",   df.format(subtotal),
+                            "fee",        df.format(fee),
+                            "total",      df.format(total));
+                } else {
+                    double income = round2(subtotal - fee);
+                    lang.sendNoPrefix(player, "sell-confirm",
+                            "unit_price", df.format(unitPrice),
+                            "amount",     String.valueOf(amount),
+                            "subtotal",   df.format(subtotal),
+                            "fee",        df.format(fee),
+                            "income",     df.format(income));
+                }
+
+                // Confirm / cancel buttons
+                String confirmCmd = isBuy
+                        ? "/mstock _buy_confirm " + code + " " + amount
+                        : "/mstock _sell_confirm " + code + " " + amount;
+                String confirmLine =
+                        "<click:run_command:'/mstock _cancel_confirm'>" +
+                        "<hover:show_text:'<gray>取消本次交易</gray>'>" +
+                        "<red>[ 取消 ]</red></hover></click>" +
+                        "   " +
+                        "<click:run_command:'" + confirmCmd + "'>" +
+                        "<hover:show_text:'<gray>确认并执行交易</gray>'>" +
+                        "<green>[ 确认 ]</green></hover></click>";
+                player.sendMessage(LangUtil.parse("  " + confirmLine));
+            });
+        }).exceptionally(ex -> {
+            session.clearSession(player.getUniqueId());
+            plugin.getServer().getScheduler().runTask(plugin, () ->
+                    lang.send(player, "api-error"));
+            return null;
+        });
     }
 
     public void executeBuy(Player player, String code, int amount) {
@@ -334,8 +454,6 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        lang.send(player, "api-fetching", "code", code);
-
         api.fetch(code).thenAccept(info -> {
             double unitPrice = round2(info.getPrice() * config.getPriceRatio());
             double subtotal  = round2(unitPrice * amount);
@@ -343,14 +461,6 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
             double total     = round2(subtotal + fee);
 
             plugin.getServer().getScheduler().runTask(plugin, () -> {
-                // Show fee breakdown before deducting
-                lang.sendNoPrefix(player, "buy-confirm",
-                        "unit_price", df.format(unitPrice),
-                        "amount",     String.valueOf(amount),
-                        "subtotal",   df.format(subtotal),
-                        "fee",        df.format(fee),
-                        "total",      df.format(total));
-
                 if (!economy.has(player, total)) {
                     lang.send(player, "not-enough-money",
                             "need",    df.format(total),
@@ -411,24 +521,11 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
 
-                plugin.getServer().getScheduler().runTask(plugin, () ->
-                        lang.send(player, "api-fetching", "code", code));
-
                 api.fetch(code).thenAccept(info -> {
                     double sellPrice = round2(info.getPrice() * config.getPriceRatio());
                     double subtotal  = round2(sellPrice * amount);
                     double fee       = calcFee(subtotal);
                     double income    = round2(subtotal - fee);
-
-                    plugin.getServer().getScheduler().runTask(plugin, () -> {
-                        // Show fee breakdown before crediting
-                        lang.sendNoPrefix(player, "sell-confirm",
-                                "unit_price", df.format(sellPrice),
-                                "amount",     String.valueOf(amount),
-                                "subtotal",   df.format(subtotal),
-                                "fee",        df.format(fee),
-                                "income",     df.format(income));
-                    });
 
                     plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
                         try {
