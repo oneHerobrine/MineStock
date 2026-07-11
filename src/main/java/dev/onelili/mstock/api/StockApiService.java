@@ -23,16 +23,40 @@ public class StockApiService {
         this.logger = logger;
         sources.add(new ChinaStockApi(logger));
 
-        String finnhubKey = "";
-        String twelveDataKey = "";
+        List<String> finnhubKeys    = new ArrayList<>();
+        List<String> twelveDataKeys = new ArrayList<>();
+
         for (Map<?, ?> entry : config.getUsStockApis()) {
             String name = String.valueOf(entry.get("name"));
-            Object rawKey = entry.get("apikey");
-            String key = rawKey != null ? String.valueOf(rawKey) : "";
-            if ("finnhub".equalsIgnoreCase(name)) finnhubKey = key;
-            else if ("twelvedata".equalsIgnoreCase(name)) twelveDataKey = key;
+            List<String> keys = resolveKeys(entry);
+            if ("finnhub".equalsIgnoreCase(name))       finnhubKeys.addAll(keys);
+            else if ("twelvedata".equalsIgnoreCase(name)) twelveDataKeys.addAll(keys);
         }
-        sources.add(new UsStockApi(logger, finnhubKey, twelveDataKey));
+        sources.add(new UsStockApi(logger, finnhubKeys, twelveDataKeys));
+
+        long cfgCacheMs = config.getKlineCacheMs();
+        if (cfgCacheMs > 0) klineCacheMs = cfgCacheMs;
+    }
+
+    /**
+     * Reads API keys from a config entry.
+     * Supports both the new list form (apikeys: [...]) and the legacy single-key form (apikey: "...").
+     */
+    private static List<String> resolveKeys(Map<?, ?> entry) {
+        Object listVal = entry.get("apikeys");
+        if (listVal instanceof List<?> rawList) {
+            List<String> keys = new ArrayList<>();
+            for (Object o : rawList) {
+                String k = o != null ? String.valueOf(o).strip() : "";
+                if (!k.isBlank()) keys.add(k);
+            }
+            if (!keys.isEmpty()) return keys;
+        }
+        // Fall back to legacy single apikey
+        Object single = entry.get("apikey");
+        String k = single != null ? String.valueOf(single).strip() : "";
+        return k.isBlank() ? List.of() : List.of(k);
+    }
 
         long cfgCacheMs = config.getKlineCacheMs();
         if (cfgCacheMs > 0) klineCacheMs = cfgCacheMs;

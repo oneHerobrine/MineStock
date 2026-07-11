@@ -14,6 +14,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
@@ -22,14 +23,26 @@ public class UsStockApi implements StockSource {
     private static final Pattern US_CODE = Pattern.compile("^[A-Za-z]{1,10}$");
     private final HttpClient http;
     private final Logger logger;
-    private final String finnhubKey;
-    private final String twelveDataKey;
+    private final List<String> finnhubKeys;
+    private final List<String> twelveDataKeys;
+    private final AtomicInteger finnhubIdx   = new AtomicInteger(0);
+    private final AtomicInteger twelveDataIdx = new AtomicInteger(0);
 
-    public UsStockApi(Logger logger, String finnhubKey, String twelveDataKey) {
+    public UsStockApi(Logger logger, List<String> finnhubKeys, List<String> twelveDataKeys) {
         this.logger = logger;
-        this.finnhubKey = finnhubKey;
-        this.twelveDataKey = twelveDataKey;
+        this.finnhubKeys    = finnhubKeys.stream().filter(k -> k != null && !k.isBlank()).toList();
+        this.twelveDataKeys = twelveDataKeys.stream().filter(k -> k != null && !k.isBlank()).toList();
         this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
+    }
+
+    private String nextFinnhubKey() {
+        if (finnhubKeys.isEmpty()) return null;
+        return finnhubKeys.get(Math.abs(finnhubIdx.getAndIncrement()) % finnhubKeys.size());
+    }
+
+    private String nextTwelveDataKey() {
+        if (twelveDataKeys.isEmpty()) return null;
+        return twelveDataKeys.get(Math.abs(twelveDataIdx.getAndIncrement()) % twelveDataKeys.size());
     }
 
     @Override
@@ -53,10 +66,11 @@ public class UsStockApi implements StockSource {
     }
 
     private CompletableFuture<StockInfo> fetchFinnhub(String code) {
-        if (finnhubKey == null || finnhubKey.isBlank()) {
+        String key = nextFinnhubKey();
+        if (key == null) {
             return CompletableFuture.failedFuture(new RuntimeException("Finnhub key not configured"));
         }
-        String url = "https://finnhub.io/api/v1/quote?symbol=" + code.toUpperCase() + "&token=" + finnhubKey;
+        String url = "https://finnhub.io/api/v1/quote?symbol=" + code.toUpperCase() + "&token=" + key;
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
@@ -79,10 +93,11 @@ public class UsStockApi implements StockSource {
     }
 
     private CompletableFuture<StockInfo> fetchTwelveData(String code) {
-        if (twelveDataKey == null || twelveDataKey.isBlank()) {
+        String key = nextTwelveDataKey();
+        if (key == null) {
             return CompletableFuture.failedFuture(new RuntimeException("TwelveData key not configured"));
         }
-        String url = "https://api.twelvedata.com/quote?symbol=" + code.toUpperCase() + "&apikey=" + twelveDataKey;
+        String url = "https://api.twelvedata.com/quote?symbol=" + code.toUpperCase() + "&apikey=" + key;
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
@@ -144,13 +159,14 @@ public class UsStockApi implements StockSource {
     }
 
     private CompletableFuture<List<KLinePoint>> fetchFinnhubKLine(String code, int days) {
-        if (finnhubKey == null || finnhubKey.isBlank()) {
+        String key = nextFinnhubKey();
+        if (key == null) {
             return CompletableFuture.failedFuture(new RuntimeException("Finnhub key not configured"));
         }
         long toTs = Instant.now().getEpochSecond();
         long fromTs = LocalDate.now(ZoneOffset.UTC).minusDays(days).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
         String url = "https://finnhub.io/api/v1/stock/candles?symbol=" + code
-                + "&resolution=D&from=" + fromTs + "&to=" + toTs + "&token=" + finnhubKey;
+                + "&resolution=D&from=" + fromTs + "&to=" + toTs + "&token=" + key;
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
@@ -187,11 +203,12 @@ public class UsStockApi implements StockSource {
     }
 
     private CompletableFuture<List<KLinePoint>> fetchTwelveDataKLine(String code, int days) {
-        if (twelveDataKey == null || twelveDataKey.isBlank()) {
+        String key = nextTwelveDataKey();
+        if (key == null) {
             return CompletableFuture.failedFuture(new RuntimeException("TwelveData key not configured"));
         }
         String url = "https://api.twelvedata.com/time_series?symbol=" + code
-                + "&interval=1day&outputsize=" + days + "&apikey=" + twelveDataKey;
+                + "&interval=1day&outputsize=" + days + "&apikey=" + key;
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))

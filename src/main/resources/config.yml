@@ -19,8 +19,12 @@ transaction-fee-percent: 0.5
 kline-cache-ms: 300000
 
 # 美股 API 配置（按优先级排列，失败自动切换）
+# apikeys 支持多个 key，请求会均匀分配到每个 key（round-robin）
+# 兼容旧格式：若只填写 apikey（单项），会自动当作单元素列表处理
 us-stock-apis:
   - name: finnhub
-    apikey: ""
+    apikeys:
+      - ""
   - name: twelvedata
-    apikey: ""
+    apikeys:
+      - ""
