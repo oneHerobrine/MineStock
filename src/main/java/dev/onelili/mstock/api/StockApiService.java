@@ -58,10 +58,6 @@ public class StockApiService {
         return k.isBlank() ? List.of() : List.of(k);
     }
 
-        long cfgCacheMs = config.getKlineCacheMs();
-        if (cfgCacheMs > 0) klineCacheMs = cfgCacheMs;
-    }
-
     public CompletableFuture<StockInfo> fetch(String code) {
         for (StockSource source : sources) {
             if (source.supports(code)) return source.fetch(code);
