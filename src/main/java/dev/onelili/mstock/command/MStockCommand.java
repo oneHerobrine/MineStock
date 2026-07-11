@@ -248,14 +248,22 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                     }
                     for (Holding h : holdings) {
                         api.fetch(h.getStockCode()).thenAccept(info ->
-                                plugin.getServer().getScheduler().runTask(plugin, () ->
-                                        player.sendMessage(lang.getNoPrefix("portfolio-item",
-                                                "code", h.getStockCode(),
-                                                "name", info.getName(),
-                                                "amount", String.valueOf(h.getAmount()),
-                                                "avg_cost", df.format(h.getAvgCost() * config.getPriceRatio())
-                                        ))
-                                )
+                                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                                    double avgCost = h.getAvgCost() * config.getPriceRatio();
+                                    double currentPrice = info.getPrice() * config.getPriceRatio();
+                                    double changePct = avgCost > 0
+                                            ? (currentPrice - avgCost) / avgCost * 100.0
+                                            : 0.0;
+                                    String key = changePct >= 0 ? "portfolio-item-up" : "portfolio-item-down";
+                                    player.sendMessage(lang.getNoPrefix(key,
+                                            "code", h.getStockCode(),
+                                            "name", info.getName(),
+                                            "amount", String.valueOf(h.getAmount()),
+                                            "avg_cost", df.format(avgCost),
+                                            "price", df.format(currentPrice),
+                                            "change", df.format(Math.abs(changePct))
+                                    ));
+                                })
                         ).exceptionally(ex -> null);
                     }
                 });

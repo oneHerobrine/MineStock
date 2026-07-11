@@ -21,7 +21,8 @@ kline-period-bar: "  {btn_1m}  {btn_3m}  {btn_1y}"
 
 portfolio-header: "<gold>▍我的持仓</gold> <dark_gray>─────────────────</dark_gray>"
 portfolio-empty: "<gray>  暂无持仓，</gray><click:run_command:'/mstock recommended'><hover:show_text:'<gray>查看今日推荐</gray>'><white>/mstock recommended</white></hover></click><gray> 查看推荐股票。</gray>"
-portfolio-item: "  <click:run_command:'/mstock {code}'><hover:show_text:'<gray>点击查看 {code} 详情</gray>'><aqua>{code}</aqua> <gray>{name}</gray></hover></click>  <white>{amount}</white><dark_gray>股</dark_gray>  <dark_gray>均价</dark_gray> <white>{avg_cost}</white>  <click:run_command:'/mstock _sell_init {code}'><hover:show_text:'<gray>卖出 {code}</gray>'><red>[ 卖出 ]</red></hover></click>"
+portfolio-item-up: "  <click:run_command:'/mstock {code}'><hover:show_text:'<gray>点击查看 {code} 详情</gray>'><aqua>{code}</aqua> <gray>{name}</gray></hover></click>  <white>{amount}</white><dark_gray>股</dark_gray>  <dark_gray>买入均价</dark_gray> <white>{avg_cost}</white>  <dark_gray>现价</dark_gray> <white>{price}</white>  <red>▲ +{change}%</red>  <click:run_command:'/mstock _sell_init {code}'><hover:show_text:'<gray>卖出 {code}</gray>'><red>[ 卖出 ]</red></hover></click>"
+portfolio-item-down: "  <click:run_command:'/mstock {code}'><hover:show_text:'<gray>点击查看 {code} 详情</gray>'><aqua>{code}</aqua> <gray>{name}</gray></hover></click>  <white>{amount}</white><dark_gray>股</dark_gray>  <dark_gray>买入均价</dark_gray> <white>{avg_cost}</white>  <dark_gray>现价</dark_gray> <white>{price}</white>  <green>▼ -{change}%</green>  <click:run_command:'/mstock _sell_init {code}'><hover:show_text:'<gray>卖出 {code}</gray>'><red>[ 卖出 ]</red></hover></click>"
 
 buy-prompt: "买入 <aqua>{code}</aqua>  <dark_gray>当前价格</dark_gray> <white>{price}</white> <dark_gray>金币/股</dark_gray>  请输入股数 <dark_gray>（输入 cancel 退出）</dark_gray>："
 sell-prompt: "卖出 <aqua>{code}</aqua>  <dark_gray>当前价格</dark_gray> <white>{price}</white> <dark_gray>金币/股</dark_gray>  请输入股数 <dark_gray>（输入 cancel 退出）</dark_gray>："
