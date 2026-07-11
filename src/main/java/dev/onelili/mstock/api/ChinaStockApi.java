@@ -8,8 +8,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -115,69 +113,68 @@ public class ChinaStockApi implements StockSource {
 
     @Override
     public CompletableFuture<List<KLinePoint>> fetchKLine(String code, int days) {
-        // eastmoney: secid = "1.code" for SH (6开头), "0.code" for SZ
-        String market = code.startsWith("6") ? "1" : "0";
-        String beg = LocalDate.now().minusDays(days)
-                .format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-        String url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-                + "?secid=" + market + "." + code
-                + "&fields1=f1,f2,f3,f4,f5&fields2=f51,f52,f53,f54,f55"
-                + "&klt=101&fqt=0&beg=" + beg + "&end=20500101";
+        String prefix = code.startsWith("6") ? "sh" : "sz";
+        String url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php"
+                + "/CN_MarketData.getKLineData?symbol=" + prefix + code
+                + "&scale=240&datalen=" + days + "&ma=no";
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
                 .header("User-Agent", "Mozilla/5.0")
-                .header("Referer", "https://quote.eastmoney.com/")
+                .header("Referer", "https://finance.sina.com.cn/")
                 .GET().build();
         return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
                 .thenApply(resp -> {
                     if (resp.statusCode() != 200)
-                        throw new RuntimeException("EastMoney KLine HTTP " + resp.statusCode());
-                    return parseEastMoneyKLine(resp.body());
+                        throw new RuntimeException("Sina KLine HTTP " + resp.statusCode());
+                    return parseSinaKLine(resp.body());
                 });
     }
 
     /**
-     * Parses EastMoney kline response.
-     * klines array entries: "2024-01-02,open,close,high,low"
+     * Parses Sina historical K-line JSON.
+     * Format: [{"day":"2024-01-02","open":"9.50","high":"9.90","low":"9.40","close":"9.80","volume":"..."},...]
      */
-    private List<KLinePoint> parseEastMoneyKLine(String body) {
+    private List<KLinePoint> parseSinaKLine(String body) {
         List<KLinePoint> result = new ArrayList<>();
-        // Find "klines":["...","..."]
-        String marker = "\"klines\":[";
-        int start = body.indexOf(marker);
-        if (start < 0) {
-            // data may be null when no trading data (e.g. new stock)
-            if (body.contains("\"klines\":null") || body.contains("\"data\":null"))
-                throw new RuntimeException("EastMoney KLine: no data");
-            throw new RuntimeException("EastMoney KLine: unexpected format: "
-                    + body.substring(0, Math.min(200, body.length())));
-        }
-        start += marker.length();
-        int end = body.indexOf(']', start);
-        if (end < 0) throw new RuntimeException("EastMoney KLine: malformed array");
-
-        String arr = body.substring(start, end);
-        // Each entry is "YYYY-MM-DD,open,close,high,low" wrapped in quotes
-        int pos = 0;
-        while (pos < arr.length()) {
-            int q1 = arr.indexOf('"', pos);
-            if (q1 < 0) break;
-            int q2 = arr.indexOf('"', q1 + 1);
-            if (q2 < 0) break;
-            String entry = arr.substring(q1 + 1, q2);
-            String[] f = entry.split(",");
-            if (f.length >= 5) {
-                double open  = parseDouble(f[1]);
-                double close = parseDouble(f[2]);
-                double high  = parseDouble(f[3]);
-                double low   = parseDouble(f[4]);
-                result.add(new KLinePoint(open, high, low, close, f[0]));
+        String trimmed = body.trim();
+        if (!trimmed.startsWith("["))
+            throw new RuntimeException("Unexpected Sina KLine response: "
+                    + trimmed.substring(0, Math.min(100, trimmed.length())));
+        int i = 0;
+        while (i < trimmed.length()) {
+            int objStart = trimmed.indexOf('{', i);
+            if (objStart < 0) break;
+            int objEnd = trimmed.indexOf('}', objStart);
+            if (objEnd < 0) break;
+            String obj = trimmed.substring(objStart, objEnd + 1);
+            String date  = extractStr(obj, "day");
+            double open  = extractDouble(obj, "open");
+            double high  = extractDouble(obj, "high");
+            double low   = extractDouble(obj, "low");
+            double close = extractDouble(obj, "close");
+            if (date != null && close != 0) {
+                result.add(new KLinePoint(open, high, low, close, date));
             }
-            pos = q2 + 1;
+            i = objEnd + 1;
         }
         if (result.isEmpty())
-            throw new RuntimeException("EastMoney KLine empty result");
+            throw new RuntimeException("Sina KLine empty result: "
+                    + trimmed.substring(0, Math.min(200, trimmed.length())));
         return result;
+    }
+
+    private String extractStr(String obj, String field) {
+        String key = "\"" + field + "\":\"";
+        int s = obj.indexOf(key);
+        if (s < 0) return null;
+        s += key.length();
+        int e = obj.indexOf('"', s);
+        return e < 0 ? null : obj.substring(s, e);
+    }
+
+    private double extractDouble(String obj, String field) {
+        String val = extractStr(obj, field);
+        return val == null ? 0.0 : parseDouble(val);
     }
 }
