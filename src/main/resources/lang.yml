@@ -26,8 +26,10 @@ sell-prompt: "卖出 <aqua>{code}</aqua>，请输入数量 <dark_gray>（输入 
 input-cancelled: "<gray>  已取消。</gray>"
 input-invalid: "<red>✗ 请输入正整数。</red>"
 
-buy-success: "<green>✔ 买入成功</green>  <aqua>{code}</aqua> <white>{amount}</white><dark_gray>股</dark_gray>  单价 <white>{unit_price}</white>  合计 <white>{cost}</white> <dark_gray>金币</dark_gray>"
-sell-success: "<green>✔ 卖出成功</green>  <aqua>{code}</aqua> <white>{amount}</white><dark_gray>股</dark_gray>  到账 <white>{income}</white> <dark_gray>金币</dark_gray>"
+buy-confirm: "  <dark_gray>股价</dark_gray> <white>{unit_price}</white>  × <white>{amount}</white> 股  =  <white>{subtotal}</white>  <dark_gray>手续费</dark_gray> <yellow>{fee}</yellow>  <dark_gray>合计</dark_gray> <white>{total}</white> <dark_gray>金币</dark_gray>"
+sell-confirm: "  <dark_gray>股价</dark_gray> <white>{unit_price}</white>  × <white>{amount}</white> 股  =  <white>{subtotal}</white>  <dark_gray>手续费</dark_gray> <yellow>{fee}</yellow>  <dark_gray>到账</dark_gray> <white>{income}</white> <dark_gray>金币</dark_gray>"
+buy-success: "<green>✔ 买入成功</green>  <aqua>{code}</aqua> <white>{amount}</white><dark_gray>股</dark_gray>  合计 <white>{total}</white> <dark_gray>金币（含手续费 </dark_gray><yellow>{fee}</yellow><dark_gray>）</dark_gray>"
+sell-success: "<green>✔ 卖出成功</green>  <aqua>{code}</aqua> <white>{amount}</white><dark_gray>股</dark_gray>  到账 <white>{income}</white> <dark_gray>金币（扣手续费 </dark_gray><yellow>{fee}</yellow><dark_gray>）</dark_gray>"
 not-enough-money: "<red>✗ 余额不足</red>  需要 <white>{need}</white> 金币，当前余额 <white>{balance}</white> 金币"
 not-enough-holding: "<red>✗ 持仓不足</red>  持有 <white>{hold}</white> 股，无法卖出 <white>{amount}</white> 股"
 no-holding: "<red>✗ 你没有持仓 <aqua>{code}</aqua></red>"

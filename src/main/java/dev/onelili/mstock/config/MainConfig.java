@@ -46,6 +46,12 @@ public class MainConfig {
         return cfg().getDouble("price-ratio", 1.0);
     }
 
+    /** 手续费费率，范围 [0, 1)，例如 0.005 表示 0.5%。 */
+    public double getTransactionFeeRate() {
+        double pct = cfg().getDouble("transaction-fee-percent", 0.5);
+        return Math.max(0.0, pct) / 100.0;
+    }
+
     public List<Map<?, ?>> getUsStockApis() {
         List<Map<?, ?>> list = new ArrayList<>();
         List<?> raw = cfg().getList("us-stock-apis");

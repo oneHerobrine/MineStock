@@ -21,6 +21,8 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.SQLException;
 import java.text.DecimalFormat;
 import java.util.*;
@@ -335,18 +337,28 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         lang.send(player, "api-fetching", "code", code);
 
         api.fetch(code).thenAccept(info -> {
-            double unitPrice = info.getPrice() * config.getPriceRatio();
-            double totalCost = unitPrice * amount;
+            double unitPrice = round2(info.getPrice() * config.getPriceRatio());
+            double subtotal  = round2(unitPrice * amount);
+            double fee       = calcFee(subtotal);
+            double total     = round2(subtotal + fee);
 
             plugin.getServer().getScheduler().runTask(plugin, () -> {
-                if (!economy.has(player, totalCost)) {
+                // Show fee breakdown before deducting
+                lang.sendNoPrefix(player, "buy-confirm",
+                        "unit_price", df.format(unitPrice),
+                        "amount",     String.valueOf(amount),
+                        "subtotal",   df.format(subtotal),
+                        "fee",        df.format(fee),
+                        "total",      df.format(total));
+
+                if (!economy.has(player, total)) {
                     lang.send(player, "not-enough-money",
-                            "need", df.format(totalCost),
+                            "need",    df.format(total),
                             "balance", df.format(economy.getBalance(player)));
                     return;
                 }
 
-                if (!economy.withdraw(player, totalCost)) {
+                if (!economy.withdraw(player, total)) {
                     lang.send(player, "db-error");
                     return;
                 }
@@ -356,14 +368,14 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                         holdingRepo.upsertBuy(player.getUniqueId(), code, amount, unitPrice);
                         plugin.getServer().getScheduler().runTask(plugin, () ->
                                 lang.send(player, "buy-success",
-                                        "code", code,
+                                        "code",   code,
                                         "amount", String.valueOf(amount),
-                                        "unit_price", df.format(unitPrice),
-                                        "cost", df.format(totalCost)));
+                                        "total",  df.format(total),
+                                        "fee",    df.format(fee)));
                     } catch (SQLException e) {
                         plugin.getLogger().warning("买入写库失败: " + e.getMessage());
                         plugin.getServer().getScheduler().runTask(plugin, () -> {
-                            economy.deposit(player, totalCost);
+                            economy.deposit(player, total);
                             lang.send(player, "db-error");
                         });
                     }
@@ -394,7 +406,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 if (holding.getAmount() < amount) {
                     plugin.getServer().getScheduler().runTask(plugin, () ->
                             lang.send(player, "not-enough-holding",
-                                    "hold", String.valueOf(holding.getAmount()),
+                                    "hold",   String.valueOf(holding.getAmount()),
                                     "amount", String.valueOf(amount)));
                     return;
                 }
@@ -403,8 +415,20 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                         lang.send(player, "api-fetching", "code", code));
 
                 api.fetch(code).thenAccept(info -> {
-                    double sellPrice = info.getPrice() * config.getPriceRatio();
-                    double income = sellPrice * amount;
+                    double sellPrice = round2(info.getPrice() * config.getPriceRatio());
+                    double subtotal  = round2(sellPrice * amount);
+                    double fee       = calcFee(subtotal);
+                    double income    = round2(subtotal - fee);
+
+                    plugin.getServer().getScheduler().runTask(plugin, () -> {
+                        // Show fee breakdown before crediting
+                        lang.sendNoPrefix(player, "sell-confirm",
+                                "unit_price", df.format(sellPrice),
+                                "amount",     String.valueOf(amount),
+                                "subtotal",   df.format(subtotal),
+                                "fee",        df.format(fee),
+                                "income",     df.format(income));
+                    });
 
                     plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
                         try {
@@ -414,9 +438,10 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                                     plugin.getLogger().severe("卖出加钱失败！玩家 " + player.getName());
                                 }
                                 lang.send(player, "sell-success",
-                                        "code", code,
+                                        "code",   code,
                                         "amount", String.valueOf(amount),
-                                        "income", df.format(income));
+                                        "income", df.format(income),
+                                        "fee",    df.format(fee));
                             });
                         } catch (SQLException e) {
                             plugin.getLogger().warning("卖出写库失败: " + e.getMessage());
@@ -435,6 +460,21 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                         lang.send(player, "db-error"));
             }
         });
+    }
+
+    /** Rounds a value to 2 decimal places (HALF_UP) to avoid floating-point drift. */
+    private double round2(double value) {
+        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    /** Calculates transaction fee for the given subtotal, rounded to 2 decimal places. */
+    private double calcFee(double subtotal) {
+        double rate = config.getTransactionFeeRate();
+        if (rate <= 0) return 0.0;
+        return BigDecimal.valueOf(subtotal)
+                .multiply(BigDecimal.valueOf(rate))
+                .setScale(2, RoundingMode.HALF_UP)
+                .doubleValue();
     }
 
     private boolean checkCooldown(Player player) {

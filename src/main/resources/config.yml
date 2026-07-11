@@ -12,6 +12,9 @@ api-cooldown-ms: 1000
 
 price-ratio: 1.0
 
+# 交易手续费费率（百分比），默认 0.5%，设为 0 表示免手续费
+transaction-fee-percent: 0.5
+
 # K线数据缓存时间（毫秒），默认 5 分钟
 kline-cache-ms: 300000
 
