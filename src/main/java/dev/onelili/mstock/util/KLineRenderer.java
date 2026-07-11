@@ -26,7 +26,7 @@ public class KLineRenderer {
 
     private static final String UP   = "<color:#FF5555>";
     private static final String DOWN = "<color:#55FF55>";
-    private static final String END  = "</color>";
+    private static final String RESET = "<reset>";
 
     /**
      * Returns HEIGHT lines of MiniMessage text representing the price trend.
@@ -92,17 +92,28 @@ public class KLineRenderer {
             grid[drawRow][0] = '_';
         }
 
-        // Build MiniMessage lines from top to bottom
+        // Build MiniMessage lines from top to bottom.
+        // Only emit a color tag when the color changes; no closing tags needed.
         List<String> lines = new ArrayList<>(HEIGHT);
         for (int row = HEIGHT - 1; row >= 0; row--) {
             StringBuilder sb = new StringBuilder("  ");
+            String currentColor = null;
             for (int col = 0; col < cols; col++) {
                 char ch = grid[row][col];
                 if (ch == ' ') {
+                    if (currentColor != null) {
+                        // switching back to no-color: reset once, then spaces need no tag
+                        sb.append(RESET);
+                        currentColor = null;
+                    }
                     sb.append(' ');
                 } else {
                     String color = isUp[row][col] ? UP : DOWN;
-                    sb.append(color).append(ch).append(END);
+                    if (!color.equals(currentColor)) {
+                        sb.append(color);
+                        currentColor = color;
+                    }
+                    sb.append(ch);
                 }
             }
             lines.add(sb.toString());
