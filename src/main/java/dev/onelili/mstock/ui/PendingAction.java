@@ -3,7 +3,7 @@ package dev.onelili.mstock.ui;
 import java.util.UUID;
 
 public class PendingAction {
-    public enum Type { BUY, SELL, KLINE_CUSTOM }
+    public enum Type { BUY, SELL }
 
     private final Type type;
     private final String stockCode;

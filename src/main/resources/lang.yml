@@ -15,9 +15,7 @@ stock-actions: "  <click:run_command:'/mstock _buy_init {code}'><hover:show_text
 kline-loading: "  <gray>K线加载中…</gray>"
 kline-error: "  <red>✗ K线数据获取失败，请稍后重试。</red>"
 kline-current-period: "  <dark_gray>当前周期</dark_gray>  <white>{days}</white> <dark_gray>天</dark_gray>"
-kline-period-bar: "  {btn_1m}  {btn_3m}  {btn_1y}  {btn_custom}"
-kline-custom-prompt: "K线自定义天数 <aqua>{code}</aqua>，请输入天数 <dark_gray>（1-365，输入 cancel 退出）</dark_gray>："
-kline-custom-invalid: "<red>✗ 无效天数，请输入 1 到 365 之间的整数。</red>"
+kline-period-bar: "  {btn_1m}  {btn_3m}  {btn_1y}"
 
 portfolio-header: "<gold>▍我的持仓</gold> <dark_gray>─────────────────</dark_gray>"
 portfolio-empty: "<gray>  暂无持仓，</gray><click:run_command:'/mstock recommended'><hover:show_text:'<gray>查看今日推荐</gray>'><white>/mstock recommended</white></hover></click><gray> 查看推荐股票。</gray>"

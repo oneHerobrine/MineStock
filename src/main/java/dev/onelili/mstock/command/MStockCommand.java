@@ -119,11 +119,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                     } catch (NumberFormatException ignored) { }
                 }
             }
-            case "_kline_custom_init" -> {
-                if (args.length == 2) {
-                    initKlineCustom(player, args[1].toUpperCase());
-                }
-            }
+
             default -> {
                 String code = args[0].toUpperCase();
                 if (api.isSupported(code)) {
@@ -230,12 +226,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         });
     }
 
-    /** Public accessor for ChatInputListener to call after custom-days input is validated. */
-    public void showKLinePublic(Player player, String code, int days) {
-        showKLine(player, code, days);
-    }
-
-    /** Called by _kline command and after custom-days input. Checks cooldown then fetches+renders the full detail page. */
+    /** Called by _kline command. Checks cooldown then fetches+renders the full detail page. */
     private void showKLine(Player player, String code, int days) {
         if (days < 1 || days > 365) return;
         if (checkCooldown(player)) return;
@@ -257,11 +248,6 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                     lang.send(player, "api-error"));
             return null;
         });
-    }
-
-    private void initKlineCustom(Player player, String code) {
-        session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.KLINE_CUSTOM, code));
-        lang.send(player, "kline-custom-prompt", "code", code);
     }
 
     /**
@@ -321,16 +307,6 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                   .append("</hover></click></gray>");
             }
             sb.append("  ");
-        }
-
-        boolean isCustom = (selectedDays != 30 && selectedDays != 90 && selectedDays != 365);
-        if (isCustom) {
-            sb.append("<green>[ 自定义 ]</green>");
-        } else {
-            sb.append("<gray><click:run_command:'/mstock _kline_custom_init ").append(code).append("'>")
-              .append("<hover:show_text:'<gray>自定义天数（1-365）</gray>'>")
-              .append("[ 自定义 ]")
-              .append("</hover></click></gray>");
         }
         return sb.toString();
     }

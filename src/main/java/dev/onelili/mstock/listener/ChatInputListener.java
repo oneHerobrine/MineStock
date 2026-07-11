@@ -48,14 +48,8 @@ public class ChatInputListener implements Listener {
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             if (action.getType() == PendingAction.Type.BUY) {
                 plugin.getCommandExecutor().executeBuy(player, action.getStockCode(), amount);
-            } else if (action.getType() == PendingAction.Type.SELL) {
+            } else {
                 plugin.getCommandExecutor().executeSell(player, action.getStockCode(), amount);
-            } else if (action.getType() == PendingAction.Type.KLINE_CUSTOM) {
-                if (amount < 1 || amount > 365) {
-                    plugin.getLang().send(player, "kline-custom-invalid");
-                    return;
-                }
-                plugin.getCommandExecutor().showKLinePublic(player, action.getStockCode(), amount);
             }
         });
     }
