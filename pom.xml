@@ -6,7 +6,7 @@
 
     <groupId>dev.onelili.mstock</groupId>
     <artifactId>MineStock</artifactId>
-    <version>1.1.2</version>
+    <version>1.1.3</version>
     <packaging>jar</packaging>
 
     <name>MineStock</name>
@@ -45,6 +45,12 @@
                                     <mainClass>dev.onelili.mstock.MineStock</mainClass>
                                 </transformer>
                             </transformers>
+                            <relocations>
+                                <relocation>
+                                    <pattern>com.tcoded.folialib</pattern>
+                                    <shadedPattern>dev.onelili.mstock.libs.folialib</shadedPattern>
+                                </relocation>
+                            </relocations>
                         </configuration>
                     </execution>
                 </executions>
@@ -81,6 +87,12 @@
             <artifactId>VaultAPI</artifactId>
             <version>1.7</version>
             <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.github.TechnicallyCoded</groupId>
+            <artifactId>FoliaLib</artifactId>
+            <version>0.4.4</version>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>com.zaxxer</groupId>

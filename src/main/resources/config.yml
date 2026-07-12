@@ -44,3 +44,27 @@ cn-stock-apis:
   - interface: sina
   - interface: tencent
   - interface: netease
+
+# 加密货币 API 配置（从上往下依次请求）
+# 代码格式：BASE/QUOTE 或 BASE-QUOTE，例如 BTC/USDT、ETH-USD
+# 纯字母代码（如 BTC）会与美股并行竞速，哪个先返回有效结果就用哪个
+#
+# tradeable：该 API 的数据是否可用于实际交易（时效性强的交易所数据为 true）
+#   - 默认值由时效性决定：实时交易所数据默认 true，聚合/延迟数据默认 false
+#   - 可在此处手动覆盖，例如将某个 API 设为 tradeable: false 仅供参考
+#
+# 可选 interface：
+#   binance   — 全球最大交易所，无需 key，~3000次/分，实时 tick 数据，tradeable 默认 true
+#   okx       — 第二大交易所，无需 key，600次/分，实时 tick 数据，tradeable 默认 true
+#   kraken    — 欧美主流交易所，无需 key，~60次/分，实时 tick 数据，tradeable 默认 true
+#   coingecko — 聚合行情，需免费注册 apikey，30次/分，1-2分钟延迟，tradeable 默认 false
+crypto-apis:
+  - interface: binance
+    tradeable: true
+  - interface: okx
+    tradeable: true
+  - interface: kraken
+    tradeable: true
+  - interface: coingecko
+    apikey: ""
+    tradeable: false

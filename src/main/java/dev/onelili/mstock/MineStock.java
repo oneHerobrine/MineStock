@@ -1,5 +1,6 @@
 package dev.onelili.mstock;
 
+import com.tcoded.folialib.FoliaLib;
 import dev.onelili.mstock.api.StockApiService;
 import dev.onelili.mstock.command.MStockCommand;
 import dev.onelili.mstock.config.DatabaseConfig;
@@ -26,10 +27,13 @@ public final class MineStock extends JavaPlugin {
     private StockApiService api;
     private ChatInputSession chatSession;
     private MStockCommand commandExecutor;
+    private FoliaLib foliaLib;
 
     @Override
     public void onEnable() {
         try {
+            foliaLib = new FoliaLib(this);
+
             mainConfig = new MainConfig(this);
             databaseConfig = new DatabaseConfig(this);
             lang = new LangUtil(this);
@@ -81,6 +85,7 @@ public final class MineStock extends JavaPlugin {
     public StockApiService getApi() { return api; }
     public ChatInputSession getChatSession() { return chatSession; }
     public MStockCommand getCommandExecutor() { return commandExecutor; }
+    public FoliaLib getFoliaLib() { return foliaLib; }
 
     public void reload() {
         reloadConfig();

@@ -54,6 +54,13 @@ public class MainConfig {
     }
 
     public List<ApiEntry> getApiEntries(String configKey) {
+        return getApiEntries(configKey, null);
+    }
+
+    /**
+     * @param defaultTradeable 若配置中未指定 tradeable，使用此默认值；传 null 则默认 false
+     */
+    public List<ApiEntry> getApiEntries(String configKey, Boolean defaultTradeable) {
         List<ApiEntry> list = new ArrayList<>();
         List<?> raw = cfg().getList(configKey);
         if (raw == null) return list;
@@ -65,7 +72,14 @@ public class MainConfig {
             if (iface.isBlank()) continue;
             Object keyObj = m.get("apikey");
             String apiKey = keyObj != null ? String.valueOf(keyObj).strip() : null;
-            list.add(new ApiEntry(iface, apiKey));
+            boolean tradeable;
+            if (m.containsKey("tradeable")) {
+                Object tv = m.get("tradeable");
+                tradeable = Boolean.parseBoolean(String.valueOf(tv));
+            } else {
+                tradeable = defaultTradeable != null && defaultTradeable;
+            }
+            list.add(new ApiEntry(iface, apiKey, tradeable));
         }
         return list;
     }

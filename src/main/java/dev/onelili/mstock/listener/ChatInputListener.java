@@ -46,8 +46,8 @@ public class ChatInputListener implements Listener {
         // Store the amount and move the session to the confirm-waiting stage.
         action.setAmount(amount);
 
-        // Fetch price on async thread (we are already async here), then send the confirm preview on main thread.
-        plugin.getServer().getScheduler().runTask(plugin, () ->
+        // 从异步聊天事件切换回主线程（Folia 使用全局调度器，Paper 使用 BukkitScheduler）
+        plugin.getFoliaLib().getImpl().runNextTick(t ->
                 plugin.getCommandExecutor().showTradeConfirm(player, action));
     }
 }
