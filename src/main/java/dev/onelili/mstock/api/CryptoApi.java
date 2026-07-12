@@ -256,7 +256,8 @@ public class CryptoApi implements StockSource {
             double price = extractDouble(body, vsCurrency);
             if (price == 0) throw new InterfaceSkipException("CoinGecko 价格为 0: " + code);
             double changePct = extractDouble(body, vsCurrency + "_24h_change");
-            double changeAmount = price / (1 + changePct / 100.0) * (changePct / 100.0);
+            double denom = 1 + changePct / 100.0;
+            double changeAmount = Math.abs(denom) < 1e-9 ? 0.0 : price / denom * (changePct / 100.0);
             String name = parts[0] + "/" + parts[1];
             return new StockInfo(code.toUpperCase(), name, price, changeAmount, changePct);
         });
@@ -325,8 +326,15 @@ public class CryptoApi implements StockSource {
         // 跳过可能的引号（部分 API 把数字包在字符串里）
         if (s < json.length() && json.charAt(s) == '"') s++;
         int e = s;
-        while (e < json.length() && (Character.isDigit(json.charAt(e))
-                || json.charAt(e) == '-' || json.charAt(e) == '.')) e++;
+        while (e < json.length()) {
+            char c = json.charAt(e);
+            if (Character.isDigit(c) || c == '.' || c == '+') { e++; continue; }
+            // '-' 只在首位或指数符号后合法
+            if (c == '-' && (e == s || json.charAt(e - 1) == 'e' || json.charAt(e - 1) == 'E')) { e++; continue; }
+            // 科学计数法指数
+            if ((c == 'e' || c == 'E') && e > s) { e++; continue; }
+            break;
+        }
         try { return Double.parseDouble(json.substring(s, e)); } catch (Exception ex) { return 0.0; }
     }
 
@@ -349,7 +357,7 @@ public class CryptoApi implements StockSource {
 
     @Override
     public CompletableFuture<List<KLinePoint>> fetchKLine(String code, int days) {
-        return CompletableFuture.failedFuture(
-                new UnsupportedOperationException("加密货币暂不支持 K 线: " + code));
+        // 加密货币暂无 K 线数据，返回空列表使详情页正常展示价格但图表为空
+        return CompletableFuture.completedFuture(new ArrayList<>());
     }
 }

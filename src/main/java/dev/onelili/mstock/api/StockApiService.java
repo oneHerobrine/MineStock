@@ -77,7 +77,7 @@ public class StockApiService {
         ).thenRun(() -> {
             if (!result.isDone()) {
                 Throwable usEx = usFuture.isCompletedExceptionally()
-                        ? usFuture.handle((v, e) -> e).join()
+                        ? usFuture.handle((v, e) -> e != null && e.getCause() != null ? e.getCause() : e).join()
                         : new RuntimeException("所有 API 均失败，代码: " + code);
                 result.completeExceptionally(usEx);
             }
@@ -91,7 +91,10 @@ public class StockApiService {
         if (cached != null && !cached.isExpired(klineCacheMs)) {
             return CompletableFuture.completedFuture(cached.data);
         }
-        // K 线不做加密货币并行竞速，直接按原有路由
+        // 加密货币走 cryptoApi（返回空列表，不报错）
+        if (cryptoApi.supports(code)) {
+            return cryptoApi.fetchKLine(code, days);
+        }
         for (StockSource source : sources) {
             if (source.supports(code)) {
                 return source.fetchKLine(code, days).thenApply(data -> {
