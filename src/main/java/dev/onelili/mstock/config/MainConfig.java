@@ -1,6 +1,7 @@
 package dev.onelili.mstock.config;
 
 import dev.onelili.mstock.MineStock;
+import dev.onelili.mstock.api.ApiEntry;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.ArrayList;
@@ -52,13 +53,19 @@ public class MainConfig {
         return Math.max(0.0, pct) / 100.0;
     }
 
-    public List<Map<?, ?>> getUsStockApis() {
-        List<Map<?, ?>> list = new ArrayList<>();
-        List<?> raw = cfg().getList("us-stock-apis");
-        if (raw != null) {
-            for (Object o : raw) {
-                if (o instanceof Map<?, ?> m) list.add(m);
-            }
+    public List<ApiEntry> getApiEntries(String configKey) {
+        List<ApiEntry> list = new ArrayList<>();
+        List<?> raw = cfg().getList(configKey);
+        if (raw == null) return list;
+        for (Object o : raw) {
+            if (!(o instanceof Map<?, ?> m)) continue;
+            Object ifaceObj = m.get("interface");
+            if (ifaceObj == null) continue;
+            String iface = String.valueOf(ifaceObj).strip().toLowerCase();
+            if (iface.isBlank()) continue;
+            Object keyObj = m.get("apikey");
+            String apiKey = keyObj != null ? String.valueOf(keyObj).strip() : null;
+            list.add(new ApiEntry(iface, apiKey));
         }
         return list;
     }

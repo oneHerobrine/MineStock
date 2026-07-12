@@ -46,8 +46,6 @@
 mvn clean package
 ```
 
-产物位于 `target/MineStock-1.0.6.jar`，放入服务器 `plugins/` 目录后重启即可。
-
 ## 作者
 
 oneLiLi

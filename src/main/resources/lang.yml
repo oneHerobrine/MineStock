@@ -42,6 +42,7 @@ api-cooldown: "<gray>  请等待 <white>{seconds}</white> 后再操作。</gray>
 api-error: "<red>✗ 获取行情失败，请稍后重试。</red>"
 api-fetching: "<gray>  正在获取 <aqua>{code}</aqua> 的实时行情…</gray>"
 
+price-out-of-sync: "<red>✗ 数据不同步，价格已变动，交易取消。请重新查看行情后再操作。</red>"
 db-error: "<red>✗ 数据库操作失败，已回滚。</red>"
 
 reload-success: "<green>✔ 配置已重载。</green>"

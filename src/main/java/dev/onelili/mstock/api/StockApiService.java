@@ -15,47 +15,18 @@ public class StockApiService {
     private final List<StockSource> sources = new ArrayList<>();
     private final Logger logger;
 
-    // K-line cache: key = "CODE:days", value = cached result + timestamp
     private final Map<String, KLineCacheEntry> klineCache = new HashMap<>();
-    private long klineCacheMs = 300_000L; // 5 minutes default
+    private long klineCacheMs = 300_000L;
 
     public StockApiService(MainConfig config, Logger logger) {
         this.logger = logger;
-        sources.add(new ChinaStockApi(logger));
 
-        List<String> finnhubKeys    = new ArrayList<>();
-        List<String> twelveDataKeys = new ArrayList<>();
-
-        for (Map<?, ?> entry : config.getUsStockApis()) {
-            String name = String.valueOf(entry.get("name"));
-            List<String> keys = resolveKeys(entry);
-            if ("finnhub".equalsIgnoreCase(name))       finnhubKeys.addAll(keys);
-            else if ("twelvedata".equalsIgnoreCase(name)) twelveDataKeys.addAll(keys);
-        }
-        sources.add(new UsStockApi(logger, finnhubKeys, twelveDataKeys));
+        sources.add(new ChinaStockApi(logger, config.getApiEntries("cn-stock-apis")));
+        sources.add(new HkStockApi(logger, config.getApiEntries("hk-stock-apis")));
+        sources.add(new UsStockApi(logger, config.getApiEntries("us-stock-apis")));
 
         long cfgCacheMs = config.getKlineCacheMs();
         if (cfgCacheMs > 0) klineCacheMs = cfgCacheMs;
-    }
-
-    /**
-     * Reads API keys from a config entry.
-     * Supports both the new list form (apikeys: [...]) and the legacy single-key form (apikey: "...").
-     */
-    private static List<String> resolveKeys(Map<?, ?> entry) {
-        Object listVal = entry.get("apikeys");
-        if (listVal instanceof List<?> rawList) {
-            List<String> keys = new ArrayList<>();
-            for (Object o : rawList) {
-                String k = o != null ? String.valueOf(o).strip() : "";
-                if (!k.isBlank()) keys.add(k);
-            }
-            if (!keys.isEmpty()) return keys;
-        }
-        // Fall back to legacy single apikey
-        Object single = entry.get("apikey");
-        String k = single != null ? String.valueOf(single).strip() : "";
-        return k.isBlank() ? List.of() : List.of(k);
     }
 
     public CompletableFuture<StockInfo> fetch(String code) {

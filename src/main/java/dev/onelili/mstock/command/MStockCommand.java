@@ -39,6 +39,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     private final ChatInputSession session;
 
     private final Map<UUID, Long> cooldowns = new HashMap<>();
+    private final Map<UUID, StockInfo> detailCache = new HashMap<>();
     private final DecimalFormat df = new DecimalFormat("#0.00");
 
     public MStockCommand(MineStock plugin) {
@@ -124,13 +125,31 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 if (args.length == 3) {
                     try {
                         int amount = Integer.parseInt(args[2]);
-                        // Only honour if there is a matching session awaiting confirm
                         PendingAction action = session.getSession(player.getUniqueId());
                         if (action != null && action.getType() == PendingAction.Type.BUY
                                 && action.getStockCode().equals(args[1].toUpperCase())
                                 && action.isAwaitingConfirm()) {
                             session.clearSession(player.getUniqueId());
-                            executeBuy(player, args[1].toUpperCase(), amount);
+                            String buyCode = args[1].toUpperCase();
+                            StockInfo cached = detailCache.get(player.getUniqueId());
+                            lang.send(player, "api-fetching", "code", buyCode);
+                            api.fetch(buyCode).thenAccept(latest -> {
+                                double cachedPrice = cached != null && cached.getCode().equals(buyCode)
+                                        ? round2(cached.getPrice() * config.getPriceRatio()) : -1;
+                                double latestPrice = round2(latest.getPrice() * config.getPriceRatio());
+                                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                                    if (cachedPrice != latestPrice) {
+                                        detailCache.remove(player.getUniqueId());
+                                        lang.send(player, "price-out-of-sync");
+                                    } else {
+                                        executeBuy(player, buyCode, amount);
+                                    }
+                                });
+                            }).exceptionally(ex -> {
+                                plugin.getServer().getScheduler().runTask(plugin, () ->
+                                        lang.send(player, "api-error"));
+                                return null;
+                            });
                         }
                     } catch (NumberFormatException ignored) { }
                 }
@@ -145,7 +164,26 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                                 && action.getStockCode().equals(args[1].toUpperCase())
                                 && action.isAwaitingConfirm()) {
                             session.clearSession(player.getUniqueId());
-                            executeSell(player, args[1].toUpperCase(), amount);
+                            String sellCode = args[1].toUpperCase();
+                            StockInfo cached = detailCache.get(player.getUniqueId());
+                            lang.send(player, "api-fetching", "code", sellCode);
+                            api.fetch(sellCode).thenAccept(latest -> {
+                                double cachedPrice = cached != null && cached.getCode().equals(sellCode)
+                                        ? round2(cached.getPrice() * config.getPriceRatio()) : -1;
+                                double latestPrice = round2(latest.getPrice() * config.getPriceRatio());
+                                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                                    if (cachedPrice != latestPrice) {
+                                        detailCache.remove(player.getUniqueId());
+                                        lang.send(player, "price-out-of-sync");
+                                    } else {
+                                        executeSell(player, sellCode, amount);
+                                    }
+                                });
+                            }).exceptionally(ex -> {
+                                plugin.getServer().getScheduler().runTask(plugin, () ->
+                                        lang.send(player, "api-error"));
+                                return null;
+                            });
                         }
                     } catch (NumberFormatException ignored) { }
                 }
@@ -226,8 +264,10 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         CompletableFuture<List<KLinePoint>> klineFuture = api.fetchKLine(code, 30);
 
         priceFuture.thenCombine(klineFuture, (info, points) -> {
-            plugin.getServer().getScheduler().runTask(plugin, () ->
-                    renderFullDetail(player, code, info, points, 30));
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                detailCache.put(player.getUniqueId(), info);
+                renderFullDetail(player, code, info, points, 30);
+            });
             return null;
         }).exceptionally(ex -> {
             plugin.getServer().getScheduler().runTask(plugin, () ->
@@ -356,40 +396,60 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         return sb.toString();
     }
 
-    /** Starts a buy session: fetch the current price first, then send the prompt with price info. */
+    /** Starts a buy session: use cached price if available, otherwise fetch from API. */
     private void initBuy(Player player, String code) {
-        lang.send(player, "api-fetching", "code", code);
-        api.fetch(code).thenAccept(info -> {
-            double unitPrice = round2(info.getPrice() * config.getPriceRatio());
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.BUY, code));
-                lang.send(player, "buy-prompt",
-                        "code", code,
-                        "price", df.format(unitPrice));
+        StockInfo cached = detailCache.get(player.getUniqueId());
+        if (cached != null && cached.getCode().equals(code)) {
+            double unitPrice = round2(cached.getPrice() * config.getPriceRatio());
+            session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.BUY, code));
+            lang.send(player, "buy-prompt",
+                    "code", code,
+                    "price", df.format(unitPrice));
+        } else {
+            lang.send(player, "api-fetching", "code", code);
+            api.fetch(code).thenAccept(info -> {
+                double unitPrice = round2(info.getPrice() * config.getPriceRatio());
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    detailCache.put(player.getUniqueId(), info);
+                    session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.BUY, code));
+                    lang.send(player, "buy-prompt",
+                            "code", code,
+                            "price", df.format(unitPrice));
+                });
+            }).exceptionally(ex -> {
+                plugin.getServer().getScheduler().runTask(plugin, () ->
+                        lang.send(player, "api-error"));
+                return null;
             });
-        }).exceptionally(ex -> {
-            plugin.getServer().getScheduler().runTask(plugin, () ->
-                    lang.send(player, "api-error"));
-            return null;
-        });
+        }
     }
 
-    /** Starts a sell session: fetch the current price first, then send the prompt with price info. */
+    /** Starts a sell session: use cached price if available, otherwise fetch from API. */
     private void initSell(Player player, String code) {
-        lang.send(player, "api-fetching", "code", code);
-        api.fetch(code).thenAccept(info -> {
-            double unitPrice = round2(info.getPrice() * config.getPriceRatio());
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.SELL, code));
-                lang.send(player, "sell-prompt",
-                        "code", code,
-                        "price", df.format(unitPrice));
+        StockInfo cached = detailCache.get(player.getUniqueId());
+        if (cached != null && cached.getCode().equals(code)) {
+            double unitPrice = round2(cached.getPrice() * config.getPriceRatio());
+            session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.SELL, code));
+            lang.send(player, "sell-prompt",
+                    "code", code,
+                    "price", df.format(unitPrice));
+        } else {
+            lang.send(player, "api-fetching", "code", code);
+            api.fetch(code).thenAccept(info -> {
+                double unitPrice = round2(info.getPrice() * config.getPriceRatio());
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    detailCache.put(player.getUniqueId(), info);
+                    session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.SELL, code));
+                    lang.send(player, "sell-prompt",
+                            "code", code,
+                            "price", df.format(unitPrice));
+                });
+            }).exceptionally(ex -> {
+                plugin.getServer().getScheduler().runTask(plugin, () ->
+                        lang.send(player, "api-error"));
+                return null;
             });
-        }).exceptionally(ex -> {
-            plugin.getServer().getScheduler().runTask(plugin, () ->
-                    lang.send(player, "api-error"));
-            return null;
-        });
+        }
     }
 
     /**
@@ -403,52 +463,48 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         int amount = action.getAmount();
         boolean isBuy = action.getType() == PendingAction.Type.BUY;
 
-        lang.send(player, "api-fetching", "code", code);
-
-        api.fetch(code).thenAccept(info -> {
-            double unitPrice = round2(info.getPrice() * config.getPriceRatio());
-            double subtotal  = round2(unitPrice * amount);
-            double fee       = calcFee(subtotal);
-
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                if (isBuy) {
-                    double total = round2(subtotal + fee);
-                    lang.sendNoPrefix(player, "buy-confirm",
-                            "unit_price", df.format(unitPrice),
-                            "amount",     String.valueOf(amount),
-                            "subtotal",   df.format(subtotal),
-                            "fee",        df.format(fee),
-                            "total",      df.format(total));
-                } else {
-                    double income = round2(subtotal - fee);
-                    lang.sendNoPrefix(player, "sell-confirm",
-                            "unit_price", df.format(unitPrice),
-                            "amount",     String.valueOf(amount),
-                            "subtotal",   df.format(subtotal),
-                            "fee",        df.format(fee),
-                            "income",     df.format(income));
-                }
-
-                // Confirm / cancel buttons
-                String confirmCmd = isBuy
-                        ? "/mstock _buy_confirm " + code + " " + amount
-                        : "/mstock _sell_confirm " + code + " " + amount;
-                String confirmLine =
-                        "<click:run_command:'/mstock _cancel_confirm'>" +
-                        "<hover:show_text:'<gray>取消本次交易</gray>'>" +
-                        "<red>[ 取消 ]</red></hover></click>" +
-                        "   " +
-                        "<click:run_command:'" + confirmCmd + "'>" +
-                        "<hover:show_text:'<gray>确认并执行交易</gray>'>" +
-                        "<green>[ 确认 ]</green></hover></click>";
-                player.sendMessage(LangUtil.parse("  " + confirmLine));
-            });
-        }).exceptionally(ex -> {
+        StockInfo cached = detailCache.get(player.getUniqueId());
+        if (cached == null || !cached.getCode().equals(code)) {
             session.clearSession(player.getUniqueId());
-            plugin.getServer().getScheduler().runTask(plugin, () ->
-                    lang.send(player, "api-error"));
-            return null;
-        });
+            lang.send(player, "api-error");
+            return;
+        }
+
+        double unitPrice = round2(cached.getPrice() * config.getPriceRatio());
+        double subtotal  = round2(unitPrice * amount);
+        double fee       = calcFee(subtotal);
+
+        if (isBuy) {
+            double total = round2(subtotal + fee);
+            lang.sendNoPrefix(player, "buy-confirm",
+                    "unit_price", df.format(unitPrice),
+                    "amount",     String.valueOf(amount),
+                    "subtotal",   df.format(subtotal),
+                    "fee",        df.format(fee),
+                    "total",      df.format(total));
+        } else {
+            double income = round2(subtotal - fee);
+            lang.sendNoPrefix(player, "sell-confirm",
+                    "unit_price", df.format(unitPrice),
+                    "amount",     String.valueOf(amount),
+                    "subtotal",   df.format(subtotal),
+                    "fee",        df.format(fee),
+                    "income",     df.format(income));
+        }
+
+        // Confirm / cancel buttons
+        String confirmCmd = isBuy
+                ? "/mstock _buy_confirm " + code + " " + amount
+                : "/mstock _sell_confirm " + code + " " + amount;
+        String confirmLine =
+                "<click:run_command:'/mstock _cancel_confirm'>" +
+                "<hover:show_text:'<gray>取消本次交易</gray>'>" +
+                "<red>[ 取消 ]</red></hover></click>" +
+                "   " +
+                "<click:run_command:'" + confirmCmd + "'>" +
+                "<hover:show_text:'<gray>确认并执行交易</gray>'>" +
+                "<green>[ 确认 ]</green></hover></click>";
+        player.sendMessage(LangUtil.parse("  " + confirmLine));
     }
 
     public void executeBuy(Player player, String code, int amount) {

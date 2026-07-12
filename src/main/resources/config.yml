@@ -18,13 +18,29 @@ transaction-fee-percent: 0.5
 # K线数据缓存时间（毫秒），默认 5 分钟
 kline-cache-ms: 300000
 
-# 美股 API 配置（按优先级排列，失败自动切换）
-# apikeys 支持多个 key，请求会均匀分配到每个 key（round-robin）
-# 兼容旧格式：若只填写 apikey（单项），会自动当作单元素列表处理
+# 港股 API 配置（从上往下依次请求）
+# 支持代码格式：4-5 位数字（0700）或带 .HK 后缀（0700.HK）
+# 可选 interface：eastmoney（无需 key）、finnhub、twelvedata
+hk-stock-apis:
+  - interface: eastmoney
+  - interface: finnhub
+    apikey: ""
+  - interface: twelvedata
+    apikey: ""
+
+# 美股 API 配置（从上往下依次请求）
+# 遇到 429 频率限制时，自动切换下一条相同 interface 的 key 重试
+# 遇到其他错误时，跳过同类 interface，切换下一种 interface
 us-stock-apis:
-  - name: finnhub
-    apikeys:
-      - ""
-  - name: twelvedata
-    apikeys:
-      - ""
+  - interface: finnhub
+    apikey: ""
+  - interface: twelvedata
+    apikey: ""
+
+# A 股 API 配置（从上往下依次请求，无需 apikey）
+# 可选 interface：sina、tencent、eastmoney、netease
+cn-stock-apis:
+  - interface: eastmoney
+  - interface: sina
+  - interface: tencent
+  - interface: netease
