@@ -10,6 +10,10 @@ commands:
     description: 股票市场命令
     usage: /mstock [recommended|<代码>|buy|sell|portfolio]
     permission: minestock.use
+  stock:
+    description: 股票市场命令
+    usage: /stock [recommended|<代码>|buy|sell|portfolio]
+    permission: minestock.use
 permissions:
   minestock.use:
     description: 允许使用 MineStock 股票市场

@@ -22,6 +22,7 @@ public class StockApiService {
     public StockApiService(MainConfig config, Logger logger) {
         this.logger = logger;
         sources.add(new ChinaStockApi(logger));
+        sources.add(new HkStockApi(logger));
 
         List<String> finnhubKeys    = new ArrayList<>();
         List<String> twelveDataKeys = new ArrayList<>();
