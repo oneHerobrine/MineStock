@@ -9,6 +9,7 @@ import dev.onelili.mstock.database.DatabaseManager;
 import dev.onelili.mstock.database.HoldingRepository;
 import dev.onelili.mstock.economy.EconomyService;
 import dev.onelili.mstock.listener.ChatInputListener;
+import dev.onelili.mstock.scheduler.CompatScheduler;
 import dev.onelili.mstock.ui.ChatInputSession;
 import dev.onelili.mstock.util.LangUtil;
 import org.bukkit.command.CommandMap;
@@ -32,6 +33,8 @@ public final class MineStock extends JavaPlugin {
     @Override
     public void onEnable() {
         try {
+            getLogger().info("运行环境: " + (CompatScheduler.isFolia() ? "Folia" : "Paper/Spigot"));
+
             mainConfig = new MainConfig(this);
             databaseConfig = new DatabaseConfig(this);
             lang = new LangUtil(this);
