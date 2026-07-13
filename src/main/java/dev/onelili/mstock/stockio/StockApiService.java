@@ -1,4 +1,4 @@
-package dev.onelili.mstock.api;
+package dev.onelili.mstock.stockio;
 
 import dev.onelili.mstock.config.MainConfig;
 import dev.onelili.mstock.model.KLinePoint;

@@ -1,13 +1,19 @@
 package dev.onelili.mstock.command;
 
 import dev.onelili.mstock.MineStock;
-import dev.onelili.mstock.api.StockApiService;
+import dev.onelili.mstock.api.event.StockBuyEvent;
+import dev.onelili.mstock.api.event.StockPortfolioQueryEvent;
+import dev.onelili.mstock.api.event.StockPreBuyEvent;
+import dev.onelili.mstock.api.event.StockPreSellEvent;
+import dev.onelili.mstock.api.event.StockQueryEvent;
+import dev.onelili.mstock.api.event.StockSellEvent;
 import dev.onelili.mstock.config.MainConfig;
 import dev.onelili.mstock.database.HoldingRepository;
 import dev.onelili.mstock.economy.EconomyService;
 import dev.onelili.mstock.model.Holding;
 import dev.onelili.mstock.model.KLinePoint;
 import dev.onelili.mstock.model.StockInfo;
+import dev.onelili.mstock.stockio.StockApiService;
 import dev.onelili.mstock.ui.ChatInputSession;
 import dev.onelili.mstock.ui.PendingAction;
 import dev.onelili.mstock.util.KLineRenderer;
@@ -219,6 +225,10 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     private void showStockDetail(Player player, String code) {
         if (checkCooldown(player)) return;
 
+        StockQueryEvent queryEvent = new StockQueryEvent(player, code);
+        plugin.getServer().getPluginManager().callEvent(queryEvent);
+        if (queryEvent.isCancelled()) return;
+
         lang.send(player, "api-fetching", "code", code);
 
         // Fetch real-time price and default 30-day K-line in parallel, render together
@@ -237,6 +247,10 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     }
 
     private void showPortfolio(Player player) {
+        StockPortfolioQueryEvent portfolioEvent = new StockPortfolioQueryEvent(player);
+        plugin.getServer().getPluginManager().callEvent(portfolioEvent);
+        if (portfolioEvent.isCancelled()) return;
+
         plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
                 List<Holding> holdings = holdingRepo.findAllByPlayer(player.getUniqueId());
@@ -476,6 +490,10 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                     return;
                 }
 
+                StockPreBuyEvent preEvent = new StockPreBuyEvent(player, code, amount, unitPrice, fee, total);
+                plugin.getServer().getPluginManager().callEvent(preEvent);
+                if (preEvent.isCancelled()) return;
+
                 if (!economy.withdraw(player, total)) {
                     lang.send(player, "db-error");
                     return;
@@ -484,12 +502,15 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
                     try {
                         holdingRepo.upsertBuy(player.getUniqueId(), code, amount, unitPrice);
-                        plugin.getServer().getScheduler().runTask(plugin, () ->
-                                lang.send(player, "buy-success",
-                                        "code",   code,
-                                        "amount", String.valueOf(amount),
-                                        "total",  df.format(total),
-                                        "fee",    df.format(fee)));
+                        plugin.getServer().getScheduler().runTask(plugin, () -> {
+                            plugin.getServer().getPluginManager().callEvent(
+                                    new StockBuyEvent(player, code, amount, unitPrice, fee, total));
+                            lang.send(player, "buy-success",
+                                    "code",   code,
+                                    "amount", String.valueOf(amount),
+                                    "total",  df.format(total),
+                                    "fee",    df.format(fee));
+                        });
                     } catch (SQLException e) {
                         plugin.getLogger().warning("买入写库失败: " + e.getMessage());
                         plugin.getServer().getScheduler().runTask(plugin, () -> {
@@ -535,24 +556,32 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                     double fee       = calcFee(subtotal);
                     double income    = round2(subtotal - fee);
 
-                    plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
-                        try {
-                            holdingRepo.reduceSell(player.getUniqueId(), code, amount, sellPrice);
-                            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                                if (!economy.deposit(player, income)) {
-                                    plugin.getLogger().severe("卖出加钱失败！玩家 " + player.getName());
-                                }
-                                lang.send(player, "sell-success",
-                                        "code",   code,
-                                        "amount", String.valueOf(amount),
-                                        "income", df.format(income),
-                                        "fee",    df.format(fee));
-                            });
-                        } catch (SQLException e) {
-                            plugin.getLogger().warning("卖出写库失败: " + e.getMessage());
-                            plugin.getServer().getScheduler().runTask(plugin, () ->
-                                    lang.send(player, "db-error"));
-                        }
+                    plugin.getServer().getScheduler().runTask(plugin, () -> {
+                        StockPreSellEvent preEvent = new StockPreSellEvent(player, code, amount, sellPrice, fee, income);
+                        plugin.getServer().getPluginManager().callEvent(preEvent);
+                        if (preEvent.isCancelled()) return;
+
+                        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+                            try {
+                                holdingRepo.reduceSell(player.getUniqueId(), code, amount, sellPrice);
+                                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                                    if (!economy.deposit(player, income)) {
+                                        plugin.getLogger().severe("卖出加钱失败！玩家 " + player.getName());
+                                    }
+                                    plugin.getServer().getPluginManager().callEvent(
+                                            new StockSellEvent(player, code, amount, sellPrice, fee, income));
+                                    lang.send(player, "sell-success",
+                                            "code",   code,
+                                            "amount", String.valueOf(amount),
+                                            "income", df.format(income),
+                                            "fee",    df.format(fee));
+                                });
+                            } catch (SQLException e) {
+                                plugin.getLogger().warning("卖出写库失败: " + e.getMessage());
+                                plugin.getServer().getScheduler().runTask(plugin, () ->
+                                        lang.send(player, "db-error"));
+                            }
+                        });
                     });
                 }).exceptionally(ex -> {
                     plugin.getServer().getScheduler().runTask(plugin, () ->

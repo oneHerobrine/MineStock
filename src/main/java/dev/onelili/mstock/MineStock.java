@@ -1,6 +1,7 @@
 package dev.onelili.mstock;
 
-import dev.onelili.mstock.api.StockApiService;
+import dev.onelili.mstock.api.MineStockAPI;
+import dev.onelili.mstock.stockio.StockApiService;
 import dev.onelili.mstock.command.MStockCommand;
 import dev.onelili.mstock.config.DatabaseConfig;
 import dev.onelili.mstock.config.MainConfig;
@@ -73,6 +74,8 @@ public final class MineStock extends JavaPlugin {
             getServer().getPluginManager().registerEvents(
                     new ChatInputListener(this, chatSession), this);
 
+            MineStockAPI.init(this);
+
             getLogger().info("MineStock 插件已启用");
         } catch (SQLException e) {
             getLogger().severe("数据库初始化失败: " + e.getMessage());
@@ -83,6 +86,7 @@ public final class MineStock extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        MineStockAPI.shutdown();
         if (dbManager != null) {
             dbManager.close();
         }
