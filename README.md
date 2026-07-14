@@ -40,13 +40,19 @@
 
 使用 SQLite（H2 嵌入式数据库）本地持久化玩家持仓，无需额外数据库服务。
 
+## PlugManX 热加载
+
+MineStock 支持通过 PlugManX 禁用、卸载并重新加载。卸载时会注销动态 `/st` 命令、取消行情请求、清理聊天会话，并等待最多 10 秒让已经修改余额的交易完成持仓写入。
+
+若其他插件使用 `MineStockAPI` 或监听 MineStock 自定义事件，应先卸载这些依赖插件，并在 MineStock 重新加载后再加载它们。旧类加载器创建的 API 对象不能跨热重载继续使用。
+
 ## 构建
 
 ```bash
 mvn clean package
 ```
 
-产物位于 `target/MineStock-1.0.6.jar`，放入服务器 `plugins/` 目录后重启即可。
+产物位于 `target/MineStock-1.2.1.jar`，放入服务器 `plugins/` 目录后即可使用。
 
 ## 作者
 

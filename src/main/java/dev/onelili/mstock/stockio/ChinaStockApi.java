@@ -177,4 +177,9 @@ public class ChinaStockApi implements StockSource {
         String val = extractStr(obj, field);
         return val == null ? 0.0 : parseDouble(val);
     }
+
+    @Override
+    public void close() {
+        http.shutdownNow();
+    }
 }

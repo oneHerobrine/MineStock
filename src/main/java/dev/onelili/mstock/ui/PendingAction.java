@@ -7,7 +7,7 @@ public class PendingAction {
     private final String stockCode;
     private final long timestamp;
     // Set after the player enters an amount; used during the confirm step.
-    private int amount = 0;
+    private volatile int amount = 0;
 
     public PendingAction(Type type, String stockCode) {
         this.type = type;

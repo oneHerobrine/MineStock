@@ -5,18 +5,23 @@ import dev.onelili.mstock.model.KLinePoint;
 import dev.onelili.mstock.model.StockInfo;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 
-public class StockApiService {
+public class StockApiService implements AutoCloseable {
     private final List<StockSource> sources = new ArrayList<>();
     private final Logger logger;
+    private final AtomicBoolean closed = new AtomicBoolean();
+    private final Set<CompletableFuture<?>> inFlight = ConcurrentHashMap.newKeySet();
 
     // K-line cache: key = "CODE:days", value = cached result + timestamp
-    private final Map<String, KLineCacheEntry> klineCache = new HashMap<>();
+    private final Map<String, KLineCacheEntry> klineCache = new ConcurrentHashMap<>();
     private long klineCacheMs = 300_000L; // 5 minutes default
 
     public StockApiService(MainConfig config, Logger logger) {
@@ -37,6 +42,12 @@ public class StockApiService {
 
         long cfgCacheMs = config.getKlineCacheMs();
         if (cfgCacheMs > 0) klineCacheMs = cfgCacheMs;
+    }
+
+    StockApiService(List<StockSource> sources, long klineCacheMs, Logger logger) {
+        this.logger = logger;
+        this.sources.addAll(sources);
+        if (klineCacheMs > 0) this.klineCacheMs = klineCacheMs;
     }
 
     /**
@@ -60,14 +71,16 @@ public class StockApiService {
     }
 
     public CompletableFuture<StockInfo> fetch(String code) {
+        if (closed.get()) return closedFuture();
         for (StockSource source : sources) {
-            if (source.supports(code)) return source.fetch(code);
+            if (source.supports(code)) return track(() -> source.fetch(code));
         }
         return CompletableFuture.failedFuture(
                 new UnsupportedOperationException("Unsupported stock code: " + code));
     }
 
     public CompletableFuture<List<KLinePoint>> fetchKLine(String code, int days) {
+        if (closed.get()) return closedFuture();
         String cacheKey = code + ":" + days;
         KLineCacheEntry cached = klineCache.get(cacheKey);
         if (cached != null && !cached.isExpired(klineCacheMs)) {
@@ -75,10 +88,10 @@ public class StockApiService {
         }
         for (StockSource source : sources) {
             if (source.supports(code)) {
-                return source.fetchKLine(code, days).thenApply(data -> {
+                return track(() -> source.fetchKLine(code, days).thenApply(data -> {
                     klineCache.put(cacheKey, new KLineCacheEntry(data));
                     return data;
-                });
+                }));
             }
         }
         return CompletableFuture.failedFuture(
@@ -86,7 +99,44 @@ public class StockApiService {
     }
 
     public boolean isSupported(String code) {
+        if (closed.get()) return false;
         return sources.stream().anyMatch(s -> s.supports(code));
+    }
+
+    @Override
+    public void close() {
+        if (!closed.compareAndSet(false, true)) return;
+
+        for (CompletableFuture<?> future : List.copyOf(inFlight)) future.cancel(true);
+        inFlight.clear();
+        klineCache.clear();
+        for (StockSource source : sources) {
+            try {
+                source.close();
+            } catch (RuntimeException e) {
+                logger.warning("[MineStock] 关闭行情数据源失败: " + e.getMessage());
+            }
+        }
+    }
+
+    private <T> CompletableFuture<T> track(Supplier<CompletableFuture<T>> operation) {
+        if (closed.get()) return closedFuture();
+
+        CompletableFuture<T> future;
+        try {
+            future = operation.get();
+        } catch (RuntimeException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+        inFlight.add(future);
+        future.whenComplete((ignored, error) -> inFlight.remove(future));
+        if (closed.get() && inFlight.remove(future)) future.cancel(true);
+        return future;
+    }
+
+    private static <T> CompletableFuture<T> closedFuture() {
+        return CompletableFuture.failedFuture(
+                new IllegalStateException("MineStock stock service is closed"));
     }
 
     private static class KLineCacheEntry {

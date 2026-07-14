@@ -285,4 +285,9 @@ public class UsStockApi implements StockSource {
         }
         return arr;
     }
+
+    @Override
+    public void close() {
+        http.shutdownNow();
+    }
 }

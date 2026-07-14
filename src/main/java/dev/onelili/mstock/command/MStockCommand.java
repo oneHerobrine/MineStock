@@ -10,6 +10,7 @@ import dev.onelili.mstock.api.event.StockSellEvent;
 import dev.onelili.mstock.config.MainConfig;
 import dev.onelili.mstock.database.HoldingRepository;
 import dev.onelili.mstock.economy.EconomyService;
+import dev.onelili.mstock.lifecycle.LifecycleTaskManager;
 import dev.onelili.mstock.model.Holding;
 import dev.onelili.mstock.model.KLinePoint;
 import dev.onelili.mstock.model.StockInfo;
@@ -31,22 +32,22 @@ import org.jetbrains.annotations.Nullable;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.SQLException;
-import java.text.DecimalFormat;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 public class MStockCommand implements CommandExecutor, TabCompleter {
     private final MineStock plugin;
-    private final StockApiService api;
+    private volatile StockApiService api;
     private final HoldingRepository holdingRepo;
     private final EconomyService economy;
-    private final MainConfig config;
-    private final LangUtil lang;
+    private volatile MainConfig config;
+    private volatile LangUtil lang;
     private final ChatInputSession session;
 
-    private final Map<UUID, Long> cooldowns = new HashMap<>();
-    private final DecimalFormat df = new DecimalFormat("#0.00");
+    private final Map<UUID, Long> cooldowns = new ConcurrentHashMap<>();
 
     public MStockCommand(MineStock plugin) {
         this.plugin = plugin;
@@ -58,18 +59,35 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         this.session = plugin.getChatSession();
     }
 
+    public void refresh(StockApiService api, MainConfig config, LangUtil lang) {
+        this.api = api;
+        this.config = config;
+        this.lang = lang;
+    }
+
     // Shorthand: run on the player's region thread (Folia) or main thread (Paper/Spigot)
-    private void runOnPlayer(Player player, Runnable task) {
-        CompatScheduler.get().runOnEntity(plugin, player, task);
+    private boolean runOnPlayer(Player player, Runnable task) {
+        if (!plugin.isOperational()) return false;
+        try {
+            CompatScheduler.get().runOnEntity(plugin, player, () -> {
+                if (plugin.isOperational()) task.run();
+            });
+            return true;
+        } catch (IllegalStateException ignored) {
+            // The plugin was disabled between the lifecycle check and scheduling.
+            return false;
+        }
     }
 
     // Shorthand: run on an async thread
     private void runAsync(Runnable task) {
-        CompatScheduler.get().runAsync(plugin, task);
+        LifecycleTaskManager tasks = plugin.getTaskManager();
+        if (tasks != null) tasks.runAsync(task);
     }
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String label, @NotNull String[] args) {
+        if (!plugin.isOperational()) return true;
         if (!(sender instanceof Player player)) {
             sender.sendMessage("此命令只能由玩家执行");
             return true;
@@ -227,8 +245,8 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         return lang.getNoPrefix(key,
                 "code", info.getCode(),
                 "name", info.getName(),
-                "price", df.format(info.getPrice() * config.getPriceRatio()),
-                "change", df.format(Math.abs(info.getChangePercent()))
+                "price", format2(info.getPrice() * config.getPriceRatio()),
+                "change", format2(Math.abs(info.getChangePercent()))
         );
     }
 
@@ -280,9 +298,9 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                                             "code", h.getStockCode(),
                                             "name", info.getName(),
                                             "amount", String.valueOf(h.getAmount()),
-                                            "avg_cost", df.format(avgCost),
-                                            "price", df.format(currentPrice),
-                                            "change", df.format(Math.abs(changePct))
+                                            "avg_cost", format2(avgCost),
+                                            "price", format2(currentPrice),
+                                            "change", format2(Math.abs(changePct))
                                     ));
                                 })
                         ).exceptionally(ex -> null);
@@ -326,8 +344,8 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         lang.sendNoPrefix(player, headerKey,
                 "name",   info.getName(),
                 "code",   info.getCode(),
-                "price",  df.format(info.getPrice() * config.getPriceRatio()),
-                "change", df.format(Math.abs(info.getChangePercent())));
+                "price",  format2(info.getPrice() * config.getPriceRatio()),
+                "change", format2(Math.abs(info.getChangePercent())));
 
         List<String> chartLines = KLineRenderer.render(points);
         for (String line : chartLines) {
@@ -369,7 +387,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.BUY, code));
                 lang.send(player, "buy-prompt",
                         "code", code,
-                        "price", df.format(unitPrice));
+                        "price", format2(unitPrice));
             });
         }).exceptionally(ex -> {
             runOnPlayer(player, () -> lang.send(player, "api-error"));
@@ -385,7 +403,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 session.startSession(player.getUniqueId(), new PendingAction(PendingAction.Type.SELL, code));
                 lang.send(player, "sell-prompt",
                         "code", code,
-                        "price", df.format(unitPrice));
+                        "price", format2(unitPrice));
             });
         }).exceptionally(ex -> {
             runOnPlayer(player, () -> lang.send(player, "api-error"));
@@ -413,19 +431,19 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 if (isBuy) {
                     double total = round2(subtotal + fee);
                     lang.sendNoPrefix(player, "buy-confirm",
-                            "unit_price", df.format(unitPrice),
+                            "unit_price", format2(unitPrice),
                             "amount",     String.valueOf(amount),
-                            "subtotal",   df.format(subtotal),
-                            "fee",        df.format(fee),
-                            "total",      df.format(total));
+                            "subtotal",   format2(subtotal),
+                            "fee",        format2(fee),
+                            "total",      format2(total));
                 } else {
                     double income = round2(subtotal - fee);
                     lang.sendNoPrefix(player, "sell-confirm",
-                            "unit_price", df.format(unitPrice),
+                            "unit_price", format2(unitPrice),
                             "amount",     String.valueOf(amount),
-                            "subtotal",   df.format(subtotal),
-                            "fee",        df.format(fee),
-                            "income",     df.format(income));
+                            "subtotal",   format2(subtotal),
+                            "fee",        format2(fee),
+                            "income",     format2(income));
                 }
 
                 String confirmCmd = isBuy
@@ -468,8 +486,8 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
             runOnPlayer(player, () -> {
                 if (!economy.has(player, total)) {
                     lang.send(player, "not-enough-money",
-                            "need",    df.format(total),
-                            "balance", df.format(economy.getBalance(player)));
+                            "need",    format2(total),
+                            "balance", format2(economy.getBalance(player)));
                     return;
                 }
 
@@ -477,12 +495,27 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                 plugin.getServer().getPluginManager().callEvent(preEvent);
                 if (preEvent.isCancelled()) return;
 
-                if (!economy.withdraw(player, total)) {
+                LifecycleTaskManager tasks = plugin.getTaskManager();
+                LifecycleTaskManager.CriticalOperation settlement =
+                        tasks != null ? tasks.beginCritical() : null;
+                if (settlement == null) return;
+
+                boolean withdrawn;
+                try {
+                    withdrawn = economy.withdraw(player, total);
+                } catch (RuntimeException e) {
+                    settlement.close();
+                    plugin.getLogger().severe("买入扣款异常: " + e.getMessage());
+                    lang.send(player, "db-error");
+                    return;
+                }
+                if (!withdrawn) {
+                    settlement.close();
                     lang.send(player, "db-error");
                     return;
                 }
 
-                runAsync(() -> {
+                settlement.runAsync(() -> {
                     try {
                         holdingRepo.upsertBuy(player.getUniqueId(), code, amount, unitPrice);
                         runOnPlayer(player, () -> {
@@ -491,16 +524,25 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                             lang.send(player, "buy-success",
                                     "code",   code,
                                     "amount", String.valueOf(amount),
-                                    "total",  df.format(total),
-                                    "fee",    df.format(fee));
+                                    "total",  format2(total),
+                                    "fee",    format2(fee));
                         });
-                    } catch (SQLException e) {
+                    } catch (Exception e) {
                         plugin.getLogger().warning("买入写库失败: " + e.getMessage());
-                        runOnPlayer(player, () -> {
-                            economy.deposit(player, total);
-                            lang.send(player, "db-error");
+                        scheduleCompensation(tasks, player, () -> {
+                            if (!economy.deposit(player, total)) {
+                                plugin.getLogger().severe("买入退款失败！玩家 " + player.getName());
+                            }
                         });
                     }
+                }).exceptionally(ex -> {
+                    plugin.getLogger().severe("买入结算任务未执行: " + ex.getMessage());
+                    scheduleCompensation(tasks, player, () -> {
+                        if (!economy.deposit(player, total)) {
+                            plugin.getLogger().severe("买入退款失败！玩家 " + player.getName());
+                        }
+                    });
+                    return null;
                 });
             });
         }).exceptionally(ex -> {
@@ -541,25 +583,55 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
                         plugin.getServer().getPluginManager().callEvent(preEvent);
                         if (preEvent.isCancelled()) return;
 
-                        runAsync(() -> {
+                        LifecycleTaskManager tasks = plugin.getTaskManager();
+                        LifecycleTaskManager.CriticalOperation settlement =
+                                tasks != null ? tasks.beginCritical() : null;
+                        if (settlement == null) return;
+
+                        boolean deposited;
+                        try {
+                            deposited = economy.deposit(player, income);
+                        } catch (RuntimeException e) {
+                            settlement.close();
+                            plugin.getLogger().severe("卖出入账异常: " + e.getMessage());
+                            lang.send(player, "db-error");
+                            return;
+                        }
+                        if (!deposited) {
+                            settlement.close();
+                            plugin.getLogger().severe("卖出加钱失败！玩家 " + player.getName());
+                            lang.send(player, "db-error");
+                            return;
+                        }
+
+                        settlement.runAsync(() -> {
                             try {
                                 holdingRepo.reduceSell(player.getUniqueId(), code, amount, sellPrice);
                                 runOnPlayer(player, () -> {
-                                    if (!economy.deposit(player, income)) {
-                                        plugin.getLogger().severe("卖出加钱失败！玩家 " + player.getName());
-                                    }
                                     plugin.getServer().getPluginManager().callEvent(
                                             new StockSellEvent(player, code, amount, sellPrice, fee, income));
                                     lang.send(player, "sell-success",
                                             "code",   code,
                                             "amount", String.valueOf(amount),
-                                            "income", df.format(income),
-                                            "fee",    df.format(fee));
+                                            "income", format2(income),
+                                            "fee",    format2(fee));
                                 });
-                            } catch (SQLException e) {
+                            } catch (Exception e) {
                                 plugin.getLogger().warning("卖出写库失败: " + e.getMessage());
-                                runOnPlayer(player, () -> lang.send(player, "db-error"));
+                                scheduleCompensation(tasks, player, () -> {
+                                    if (!economy.withdraw(player, income)) {
+                                        plugin.getLogger().severe("卖出回滚扣款失败！玩家 " + player.getName());
+                                    }
+                                });
                             }
+                        }).exceptionally(ex -> {
+                            plugin.getLogger().severe("卖出结算任务未执行: " + ex.getMessage());
+                            scheduleCompensation(tasks, player, () -> {
+                                if (!economy.withdraw(player, income)) {
+                                    plugin.getLogger().severe("卖出回滚扣款失败！玩家 " + player.getName());
+                                }
+                            });
+                            return null;
                         });
                     });
                 }).exceptionally(ex -> {
@@ -573,8 +645,25 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         });
     }
 
+    private void scheduleCompensation(LifecycleTaskManager tasks, Player player, Runnable action) {
+        AtomicBoolean completed = new AtomicBoolean();
+        Runnable compensation = () -> {
+            if (completed.compareAndSet(false, true)) action.run();
+        };
+        tasks.deferUntilShutdown(compensation);
+        runOnPlayer(player, () -> {
+            tasks.cancelDeferredAction(compensation);
+            compensation.run();
+            lang.send(player, "db-error");
+        });
+    }
+
     private double round2(double value) {
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private String format2(double value) {
+        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
     private double calcFee(double subtotal) {
@@ -606,6 +695,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     @Nullable
     @Override
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String label, @NotNull String[] args) {
+        if (!plugin.isOperational()) return List.of();
         if (args.length == 1) {
             return List.of("buy", "sell", "portfolio", "recommended", "reload").stream()
                     .filter(s -> s.startsWith(args[0].toLowerCase()))

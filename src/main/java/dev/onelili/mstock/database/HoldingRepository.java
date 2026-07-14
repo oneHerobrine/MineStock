@@ -73,22 +73,35 @@ public class HoldingRepository {
     }
 
     public void reduceSell(UUID playerUuid, String code, int sellAmount, double sellPrice) throws SQLException {
-        Holding holding = findByPlayerAndCode(playerUuid, code);
-        if (holding == null) throw new SQLException("Holding not found");
-        int remaining = holding.getAmount() - sellAmount;
+        String updateSql = """
+                UPDATE holdings
+                SET amount = amount - ?, last_price = ?, last_fetched = ?
+                WHERE player_uuid = ? AND stock_code = ? AND amount >= ?
+                """;
+        String deleteSql = "DELETE FROM holdings WHERE player_uuid = ? AND stock_code = ? AND amount = 0";
         long now = System.currentTimeMillis();
-        if (remaining <= 0) {
-            delete(playerUuid, code);
-        } else {
-            String sql = "UPDATE holdings SET amount = ?, last_price = ?, last_fetched = ? WHERE player_uuid = ? AND stock_code = ?";
-            try (Connection conn = db.getConnection();
-                 PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setInt(1, remaining);
-                ps.setDouble(2, sellPrice);
-                ps.setLong(3, now);
-                ps.setString(4, playerUuid.toString());
-                ps.setString(5, code);
-                ps.executeUpdate();
+        try (Connection conn = db.getConnection()) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement update = conn.prepareStatement(updateSql);
+                 PreparedStatement delete = conn.prepareStatement(deleteSql)) {
+                update.setInt(1, sellAmount);
+                update.setDouble(2, sellPrice);
+                update.setLong(3, now);
+                update.setString(4, playerUuid.toString());
+                update.setString(5, code);
+                update.setInt(6, sellAmount);
+                if (update.executeUpdate() == 0) {
+                    conn.rollback();
+                    throw new SQLException("Holding not found or insufficient");
+                }
+
+                delete.setString(1, playerUuid.toString());
+                delete.setString(2, code);
+                delete.executeUpdate();
+                conn.commit();
+            } catch (SQLException e) {
+                if (!conn.getAutoCommit()) conn.rollback();
+                throw e;
             }
         }
     }

@@ -2,8 +2,10 @@ package dev.onelili.mstock.api;
 
 import dev.onelili.mstock.MineStock;
 import dev.onelili.mstock.database.HoldingRepository;
+import dev.onelili.mstock.lifecycle.LifecycleTaskManager;
 import dev.onelili.mstock.model.Holding;
 import dev.onelili.mstock.model.StockInfo;
+import dev.onelili.mstock.scheduler.CompatScheduler;
 import dev.onelili.mstock.stockio.StockApiService;
 import dev.onelili.mstock.ui.ChatInputSession;
 import org.bukkit.plugin.Plugin;
@@ -13,6 +15,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Public API for the MineStock plugin.
@@ -30,11 +34,11 @@ import java.util.concurrent.CompletableFuture;
  *
  * <h3>Thread safety</h3>
  * <ul>
- *   <li>Query methods return {@link CompletableFuture} and run their blocking work on the
- *       common fork-join pool. Callbacks fire on the completing thread; schedule back to the
- *       Bukkit main thread with {@code getServer().getScheduler().runTask(...)} if needed.</li>
+ *   <li>Query methods return {@link CompletableFuture} and run their blocking work on a
+ *       MineStock-owned executor. Callbacks fire on the completing thread; use
+ *       {@link CompatScheduler#runOnEntity} before accessing player state.</li>
  *   <li>Admin methods are <em>synchronous</em> and block the calling thread with JDBC.
- *       Call them from an async context (e.g. {@code runTaskAsynchronously}).</li>
+ *       Call them from an async context such as {@link CompatScheduler#runAsync}.</li>
  *   <li>{@link #isSupported}, {@link #hasActiveSession}, {@link #clearSession} are safe to
  *       call from any thread.</li>
  * </ul>
@@ -44,13 +48,13 @@ public final class MineStockAPI {
     private static volatile MineStockAPI instance;
 
     private final MineStock plugin;
-    private final StockApiService stockApi;
     private final HoldingRepository holdingRepo;
     private final ChatInputSession chatSession;
+    private final AtomicBoolean active = new AtomicBoolean(true);
+    private final java.util.Set<CompletableFuture<?>> pending = ConcurrentHashMap.newKeySet();
 
     private MineStockAPI(MineStock plugin) {
         this.plugin      = plugin;
-        this.stockApi    = plugin.getApi();
         this.holdingRepo = plugin.getHoldingRepo();
         this.chatSession = plugin.getChatSession();
     }
@@ -59,12 +63,17 @@ public final class MineStockAPI {
 
     /** Called by {@link MineStock#onEnable()}. Not intended for external use. */
     public static void init(MineStock plugin) {
-        instance = new MineStockAPI(plugin);
+        MineStockAPI previous = instance;
+        MineStockAPI replacement = new MineStockAPI(plugin);
+        instance = replacement;
+        if (previous != null) previous.close();
     }
 
     /** Called by {@link MineStock#onDisable()}. Not intended for external use. */
     public static void shutdown() {
+        MineStockAPI current = instance;
         instance = null;
+        if (current != null) current.close();
     }
 
     /**
@@ -85,7 +94,10 @@ public final class MineStockAPI {
      * @return {@code true} if at least one data source can handle it
      */
     public boolean isSupported(String stockCode) {
-        return stockApi.isSupported(stockCode.toUpperCase());
+        ensureActive();
+        StockApiService service = plugin.getApi();
+        if (service == null || !isActive()) throw new IllegalStateException("MineStock is disabled");
+        return service.isSupported(stockCode.toUpperCase());
     }
 
     /**
@@ -96,7 +108,10 @@ public final class MineStockAPI {
      *         code is unsupported or the data source returns an error
      */
     public CompletableFuture<StockInfo> getStockInfo(String stockCode) {
-        return stockApi.fetch(stockCode.toUpperCase());
+        if (!isActive()) return inactiveFuture();
+        StockApiService service = plugin.getApi();
+        if (service == null || !isActive()) return inactiveFuture();
+        return track(service.fetch(stockCode.toUpperCase()));
     }
 
     // ── Holding queries ────────────────────────────────────────────────────────
@@ -109,14 +124,17 @@ public final class MineStockAPI {
      * @return a future completing with an {@link Optional} of the holding
      */
     public CompletableFuture<Optional<Holding>> getHolding(UUID playerUuid, String stockCode) {
-        return CompletableFuture.supplyAsync(() -> {
+        if (!isActive()) return inactiveFuture();
+        LifecycleTaskManager tasks = plugin.getTaskManager();
+        if (tasks == null) return inactiveFuture();
+        return track(tasks.supplyAsync(() -> {
             try {
                 return Optional.ofNullable(
                         holdingRepo.findByPlayerAndCode(playerUuid, stockCode.toUpperCase()));
             } catch (SQLException e) {
                 throw new RuntimeException(e);
             }
-        });
+        }));
     }
 
     /**
@@ -126,13 +144,16 @@ public final class MineStockAPI {
      * @return a future completing with the list (empty if no holdings)
      */
     public CompletableFuture<List<Holding>> getAllHoldings(UUID playerUuid) {
-        return CompletableFuture.supplyAsync(() -> {
+        if (!isActive()) return inactiveFuture();
+        LifecycleTaskManager tasks = plugin.getTaskManager();
+        if (tasks == null) return inactiveFuture();
+        return track(tasks.supplyAsync(() -> {
             try {
                 return holdingRepo.findAllByPlayer(playerUuid);
             } catch (SQLException e) {
                 throw new RuntimeException(e);
             }
-        });
+        }));
     }
 
     /**
@@ -162,6 +183,7 @@ public final class MineStockAPI {
      */
     public void adminSetHolding(UUID playerUuid, String stockCode,
                                 int amount, double avgCost) throws SQLException {
+        ensureActive();
         holdingRepo.adminUpsert(playerUuid, stockCode.toUpperCase(), amount, avgCost);
     }
 
@@ -172,6 +194,7 @@ public final class MineStockAPI {
      * @throws SQLException on database error
      */
     public void adminClearHoldings(UUID playerUuid) throws SQLException {
+        ensureActive();
         holdingRepo.deleteAll(playerUuid);
     }
 
@@ -188,6 +211,7 @@ public final class MineStockAPI {
      */
     public void adminAddHolding(UUID playerUuid, String stockCode,
                                 int amount, double price) throws SQLException {
+        ensureActive();
         if (amount <= 0) throw new IllegalArgumentException("amount must be > 0");
         holdingRepo.adminAdd(playerUuid, stockCode.toUpperCase(), amount, price);
     }
@@ -205,6 +229,7 @@ public final class MineStockAPI {
      */
     public void adminReduceHolding(UUID playerUuid, String stockCode,
                                    int reduceAmount) throws SQLException {
+        ensureActive();
         if (reduceAmount <= 0) throw new IllegalArgumentException("reduceAmount must be > 0");
         holdingRepo.adminReduce(playerUuid, stockCode.toUpperCase(), reduceAmount);
     }
@@ -219,6 +244,7 @@ public final class MineStockAPI {
      * @return {@code true} if a live session exists
      */
     public boolean hasActiveSession(UUID playerUuid) {
+        ensureActive();
         return chatSession.hasSession(playerUuid);
     }
 
@@ -229,6 +255,7 @@ public final class MineStockAPI {
      * @param playerUuid the player's UUID
      */
     public void clearSession(UUID playerUuid) {
+        ensureActive();
         chatSession.clearSession(playerUuid);
     }
 
@@ -239,6 +266,33 @@ public final class MineStockAPI {
      * relative to the MineStock plugin lifecycle.
      */
     public Plugin getPlugin() {
+        ensureActive();
         return plugin;
+    }
+
+    private boolean isActive() {
+        return active.get() && plugin.isOperational();
+    }
+
+    private void ensureActive() {
+        if (!isActive()) throw new IllegalStateException("MineStock is disabled");
+    }
+
+    private <T> CompletableFuture<T> track(CompletableFuture<T> future) {
+        pending.add(future);
+        future.whenComplete((ignored, error) -> pending.remove(future));
+        if (!isActive() && pending.remove(future)) future.cancel(true);
+        return future;
+    }
+
+    private void close() {
+        if (!active.compareAndSet(true, false)) return;
+        for (CompletableFuture<?> future : List.copyOf(pending)) future.cancel(true);
+        pending.clear();
+    }
+
+    private static <T> CompletableFuture<T> inactiveFuture() {
+        return CompletableFuture.failedFuture(
+                new IllegalStateException("MineStock is disabled"));
     }
 }

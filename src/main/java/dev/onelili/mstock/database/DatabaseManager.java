@@ -6,8 +6,11 @@ import dev.onelili.mstock.config.DatabaseConfig;
 
 import java.io.File;
 import java.sql.Connection;
+import java.sql.Driver;
+import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Enumeration;
 import java.util.logging.Logger;
 
 public class DatabaseManager {
@@ -34,6 +37,7 @@ public class DatabaseManager {
             File dataDir = new File(pluginFolder, "data");
             dataDir.mkdirs();
             String h2Path = cfg.getH2File();
+            org.h2.Driver.load();
             hikari.setJdbcUrl("jdbc:h2:file:./" + h2Path + ";MODE=MySQL;AUTO_SERVER=TRUE");
             hikari.setMaximumPoolSize(2);
             hikari.setDriverClassName("org.h2.Driver");
@@ -45,8 +49,18 @@ public class DatabaseManager {
         hikari.setIdleTimeout(300000);
         hikari.setMaxLifetime(600000);
 
+        initDataSource(hikari);
+    }
+
+    void initDataSource(HikariConfig hikari) throws SQLException {
+        if (dataSource != null) close();
         dataSource = new HikariDataSource(hikari);
-        createTables();
+        try {
+            createTables();
+        } catch (SQLException e) {
+            close();
+            throw e;
+        }
     }
 
     private void createTables() throws SQLException {
@@ -67,12 +81,33 @@ public class DatabaseManager {
     }
 
     public Connection getConnection() throws SQLException {
+        if (dataSource == null || dataSource.isClosed()) {
+            throw new SQLException("MineStock database is closed");
+        }
         return dataSource.getConnection();
     }
 
-    public void close() {
-        if (dataSource != null && !dataSource.isClosed()) {
-            dataSource.close();
+    public synchronized void close() {
+        HikariDataSource current = dataSource;
+        dataSource = null;
+        if (current != null && !current.isClosed()) {
+            current.close();
+        }
+
+        ClassLoader pluginLoader = DatabaseManager.class.getClassLoader();
+        Enumeration<Driver> drivers = DriverManager.getDrivers();
+        while (drivers.hasMoreElements()) {
+            Driver driver = drivers.nextElement();
+            if (driver.getClass().getClassLoader() != pluginLoader) continue;
+            try {
+                if (driver.getClass().getName().equals("org.h2.Driver")) {
+                    org.h2.Driver.unload();
+                } else {
+                    DriverManager.deregisterDriver(driver);
+                }
+            } catch (SQLException e) {
+                logger.warning("[MineStock] 注销 JDBC 驱动失败: " + e.getMessage());
+            }
         }
     }
 }

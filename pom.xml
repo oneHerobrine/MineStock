@@ -6,7 +6,7 @@
 
     <groupId>dev.onelili.mstock</groupId>
     <artifactId>MineStock</artifactId>
-    <version>1.2.0</version>
+    <version>1.2.1</version>
     <packaging>jar</packaging>
 
     <name>MineStock</name>
@@ -93,6 +93,12 @@
             <artifactId>h2</artifactId>
             <version>2.2.224</version>
             <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

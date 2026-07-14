@@ -1,5 +1,9 @@
 package dev.onelili.mstock.stockio;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import dev.onelili.mstock.model.KLinePoint;
 import dev.onelili.mstock.model.StockInfo;
 
@@ -7,6 +11,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,7 +22,9 @@ import java.util.regex.Pattern;
 
 public class HkStockApi implements StockSource {
 
-    private static final Pattern HK_CODE = Pattern.compile("^\\d{4,5}$");
+    private static final Pattern HK_CODE = Pattern.compile("^\\d{1,5}$");
+    private static final Charset GB18030 = Charset.forName("GB18030");
+    private static final Charset GBK = Charset.forName("GBK");
     private final HttpClient http;
     private final Logger logger;
 
@@ -58,23 +66,23 @@ public class HkStockApi implements StockSource {
                 .header("User-Agent", "Mozilla/5.0")
                 .header("Referer", "https://finance.sina.com.cn/")
                 .GET().build();
-        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString(GB18030))
                 .thenApply(resp -> {
                     if (resp.statusCode() != 200) throw new RuntimeException("HTTP " + resp.statusCode());
                     return parseSina(code, resp.body());
                 });
     }
 
-    private StockInfo parseSina(String code, String body) {
+    static StockInfo parseSina(String code, String body) {
         int start = body.indexOf('"');
         int end = body.lastIndexOf('"');
         if (start < 0 || end <= start)
             throw new RuntimeException("Sina HK empty response: " + body.substring(0, Math.min(100, body.length())));
         String[] fields = body.substring(start + 1, end).split(",");
-        if (fields.length < 7) throw new RuntimeException("Sina HK fields too few: " + fields.length);
-        String name = fields[0];
-        double prevClose = parseDouble(fields[2]);
-        double price = parseDouble(fields[3]);
+        if (fields.length < 9) throw new RuntimeException("Sina HK fields too few: " + fields.length);
+        String name = fields[1];
+        double prevClose = parseDouble(fields[3]);
+        double price = parseDouble(fields[6]);
         double changeAmount = price - prevClose;
         double changePercent = prevClose != 0 ? changeAmount / prevClose * 100.0 : 0.0;
         return new StockInfo(code, name, price, changeAmount, changePercent);
@@ -88,14 +96,14 @@ public class HkStockApi implements StockSource {
                 .timeout(Duration.ofSeconds(10))
                 .header("User-Agent", "Mozilla/5.0")
                 .GET().build();
-        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString(GBK))
                 .thenApply(resp -> {
                     if (resp.statusCode() != 200) throw new RuntimeException("HTTP " + resp.statusCode());
                     return parseTencent(code, resp.body());
                 });
     }
 
-    private StockInfo parseTencent(String code, String body) {
+    static StockInfo parseTencent(String code, String body) {
         int start = body.indexOf('"');
         int end = body.lastIndexOf('"');
         if (start < 0 || end <= start) throw new RuntimeException("Tencent HK empty response");
@@ -112,67 +120,61 @@ public class HkStockApi implements StockSource {
     @Override
     public CompletableFuture<List<KLinePoint>> fetchKLine(String code, int days) {
         String padded = padCode(code);
-        String url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php"
-                + "/CN_MarketData.getKLineData?symbol=hk" + padded
-                + "&scale=240&datalen=" + days + "&ma=no";
+        String symbol = "hk" + padded;
+        String url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param="
+                + symbol + ",day,,," + days + ",qfq";
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
                 .header("User-Agent", "Mozilla/5.0")
-                .header("Referer", "https://finance.sina.com.cn/")
                 .GET().build();
-        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString())
+        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .thenApply(resp -> {
                     if (resp.statusCode() != 200)
-                        throw new RuntimeException("Sina HK KLine HTTP " + resp.statusCode());
-                    return parseSinaKLine(resp.body());
+                        throw new RuntimeException("Tencent HK KLine HTTP " + resp.statusCode());
+                    return parseTencentKLine(resp.body(), symbol);
                 });
     }
 
-    private List<KLinePoint> parseSinaKLine(String body) {
+    static List<KLinePoint> parseTencentKLine(String body, String symbol) {
         List<KLinePoint> result = new ArrayList<>();
-        String trimmed = body.trim();
-        if (!trimmed.startsWith("["))
-            throw new RuntimeException("Unexpected Sina HK KLine response: "
-                    + trimmed.substring(0, Math.min(100, trimmed.length())));
-        int i = 0;
-        while (i < trimmed.length()) {
-            int objStart = trimmed.indexOf('{', i);
-            if (objStart < 0) break;
-            int objEnd = trimmed.indexOf('}', objStart);
-            if (objEnd < 0) break;
-            String obj = trimmed.substring(objStart, objEnd + 1);
-            String date  = extractStr(obj, "day");
-            double open  = extractDouble(obj, "open");
-            double high  = extractDouble(obj, "high");
-            double low   = extractDouble(obj, "low");
-            double close = extractDouble(obj, "close");
-            if (date != null && close != 0) {
-                result.add(new KLinePoint(open, high, low, close, date));
-            }
-            i = objEnd + 1;
+        JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+        if (root.get("code").getAsInt() != 0) {
+            throw new RuntimeException("Tencent HK KLine error: " + root.get("msg").getAsString());
         }
-        if (result.isEmpty())
-            throw new RuntimeException("Sina HK KLine empty result: "
-                    + trimmed.substring(0, Math.min(200, trimmed.length())));
+
+        JsonObject stockData = root.getAsJsonObject("data").getAsJsonObject(symbol);
+        if (stockData == null) {
+            throw new RuntimeException("Tencent HK KLine missing symbol: " + symbol);
+        }
+        JsonArray rows = stockData.has("qfqday")
+                ? stockData.getAsJsonArray("qfqday")
+                : stockData.getAsJsonArray("day");
+        if (rows == null) {
+            throw new RuntimeException("Tencent HK KLine missing daily data: " + symbol);
+        }
+        for (JsonElement element : rows) {
+            JsonArray row = element.getAsJsonArray();
+            if (row.size() < 5) continue;
+            String date = row.get(0).getAsString();
+            double open = parseDouble(row.get(1).getAsString());
+            double close = parseDouble(row.get(2).getAsString());
+            double high = parseDouble(row.get(3).getAsString());
+            double low = parseDouble(row.get(4).getAsString());
+            if (close != 0) result.add(new KLinePoint(open, high, low, close, date));
+        }
+        if (result.isEmpty()) {
+            throw new RuntimeException("Tencent HK KLine empty result: " + symbol);
+        }
         return result;
     }
 
-    private String extractStr(String obj, String field) {
-        String key = "\"" + field + "\":\"";
-        int s = obj.indexOf(key);
-        if (s < 0) return null;
-        s += key.length();
-        int e = obj.indexOf('"', s);
-        return e < 0 ? null : obj.substring(s, e);
-    }
-
-    private double extractDouble(String obj, String field) {
-        String val = extractStr(obj, field);
-        return val == null ? 0.0 : parseDouble(val);
-    }
-
-    private double parseDouble(String s) {
+    private static double parseDouble(String s) {
         try { return Double.parseDouble(s.trim()); } catch (Exception e) { return 0.0; }
+    }
+
+    @Override
+    public void close() {
+        http.shutdownNow();
     }
 }
