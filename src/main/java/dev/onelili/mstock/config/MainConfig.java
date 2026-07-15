@@ -23,8 +23,24 @@ public class MainConfig {
         return cfg().getStringList("recommended-pool");
     }
 
+    /** Whether MineStock should discover the daily recommendation pool automatically. */
+    public boolean isRecommendedPoolAuto() {
+        String value = cfg().getString("recommended-pool", "");
+        return "auto".equalsIgnoreCase(value.strip());
+    }
+
     public int getRecommendedCount() {
-        return cfg().getInt("recommended-count", 3);
+        return Math.max(1, cfg().getInt("recommended-count", 3));
+    }
+
+    public int getAutoCandidateCount() {
+        return Math.max(getRecommendedCount(), Math.min(500,
+                cfg().getInt("auto-candidate-count", 100)));
+    }
+
+    public long getSignRefreshTicks() {
+        long seconds = Math.max(30L, cfg().getLong("sign-refresh-seconds", 300L));
+        return seconds * 20L;
     }
 
     public int getApiCooldownSeconds() {

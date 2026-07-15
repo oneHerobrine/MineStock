@@ -14,6 +14,7 @@ import dev.onelili.mstock.lifecycle.LifecycleTaskManager;
 import dev.onelili.mstock.model.Holding;
 import dev.onelili.mstock.model.KLinePoint;
 import dev.onelili.mstock.model.StockInfo;
+import dev.onelili.mstock.recommend.RecommendationService;
 import dev.onelili.mstock.scheduler.CompatScheduler;
 import dev.onelili.mstock.stockio.StockApiService;
 import dev.onelili.mstock.ui.ChatInputSession;
@@ -41,6 +42,7 @@ import java.util.stream.Collectors;
 public class MStockCommand implements CommandExecutor, TabCompleter {
     private final MineStock plugin;
     private volatile StockApiService api;
+    private volatile RecommendationService recommendations;
     private final HoldingRepository holdingRepo;
     private final EconomyService economy;
     private volatile MainConfig config;
@@ -52,6 +54,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     public MStockCommand(MineStock plugin) {
         this.plugin = plugin;
         this.api = plugin.getApi();
+        this.recommendations = plugin.getRecommendationService();
         this.holdingRepo = plugin.getHoldingRepo();
         this.economy = plugin.getEconomy();
         this.config = plugin.getMainConfig();
@@ -59,8 +62,10 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         this.session = plugin.getChatSession();
     }
 
-    public void refresh(StockApiService api, MainConfig config, LangUtil lang) {
+    public void refresh(StockApiService api, RecommendationService recommendations,
+                        MainConfig config, LangUtil lang) {
         this.api = api;
+        this.recommendations = recommendations;
         this.config = config;
         this.lang = lang;
     }
@@ -209,35 +214,22 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     private void showRecommendations(Player player) {
         if (checkCooldown(player)) return;
 
-        List<String> pool = config.getRecommendedPool();
-        if (pool.isEmpty()) {
-            player.sendMessage("管理员未配置推荐股票池");
-            return;
-        }
-
         lang.sendNoPrefix(player, "recommend-header");
         player.sendMessage(LangUtil.parse("  <gray>正在获取行情…</gray>"));
-
-        List<CompletableFuture<StockInfo>> futures = pool.stream()
-                .map(api::fetch)
-                .toList();
-
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                .thenRun(() -> {
-                    List<StockInfo> stocks = futures.stream()
-                            .map(f -> f.getNow(null))
-                            .filter(Objects::nonNull)
-                            .sorted(Comparator.comparingDouble(StockInfo::getChangePercent).reversed())
-                            .limit(config.getRecommendedCount())
-                            .toList();
-
-                    runOnPlayer(player, () -> {
-                        for (StockInfo info : stocks) {
-                            player.sendMessage(buildRecommendLine(info));
-                        }
-                        lang.sendNoPrefix(player, "recommend-hint");
-                    });
-                });
+        recommendations.getRecommendations().thenAccept(stocks ->
+                runOnPlayer(player, () -> {
+                    if (stocks.isEmpty()) {
+                        lang.send(player, "api-error");
+                        return;
+                    }
+                    for (StockInfo info : stocks) player.sendMessage(buildRecommendLine(info));
+                    lang.sendNoPrefix(player, "recommend-hint");
+                })
+        ).exceptionally(error -> {
+            plugin.getLogger().warning("获取今日推荐失败: " + error.getMessage());
+            runOnPlayer(player, () -> lang.send(player, "api-error"));
+            return null;
+        });
     }
 
     private Component buildRecommendLine(StockInfo info) {

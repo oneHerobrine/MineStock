@@ -10,7 +10,10 @@ import dev.onelili.mstock.database.HoldingRepository;
 import dev.onelili.mstock.economy.EconomyService;
 import dev.onelili.mstock.lifecycle.LifecycleTaskManager;
 import dev.onelili.mstock.listener.ChatInputListener;
+import dev.onelili.mstock.recommend.RecommendationService;
 import dev.onelili.mstock.scheduler.CompatScheduler;
+import dev.onelili.mstock.sign.StockSignListener;
+import dev.onelili.mstock.sign.StockSignService;
 import dev.onelili.mstock.stockio.StockApiService;
 import dev.onelili.mstock.ui.ChatInputSession;
 import dev.onelili.mstock.util.LangUtil;
@@ -33,9 +36,12 @@ public final class MineStock extends JavaPlugin {
     private HoldingRepository holdingRepo;
     private EconomyService economy;
     private volatile StockApiService api;
+    private volatile RecommendationService recommendationService;
     private ChatInputSession chatSession;
     private MStockCommand commandExecutor;
     private ChatInputListener chatListener;
+    private StockSignListener stockSignListener;
+    private StockSignService stockSignService;
     private DynamicCommandRegistration stCommandRegistration;
     private LifecycleTaskManager taskManager;
     private final AtomicBoolean operational = new AtomicBoolean();
@@ -63,6 +69,7 @@ public final class MineStock extends JavaPlugin {
             }
 
             api = new StockApiService(mainConfig, getLogger());
+            recommendationService = new RecommendationService(mainConfig, api, getLogger());
             chatSession = new ChatInputSession();
 
             commandExecutor = new MStockCommand(this);
@@ -89,6 +96,12 @@ public final class MineStock extends JavaPlugin {
 
             chatListener = new ChatInputListener(this, chatSession);
             getServer().getPluginManager().registerEvents(chatListener, this);
+
+            stockSignService = new StockSignService(
+                    this, api, recommendationService, mainConfig);
+            stockSignListener = new StockSignListener(this, stockSignService);
+            getServer().getPluginManager().registerEvents(stockSignListener, this);
+            stockSignService.start();
 
             MineStockAPI.init(this);
             operational.set(true);
@@ -118,7 +131,23 @@ public final class MineStock extends JavaPlugin {
             chatListener = null;
             cleanup("注销聊天监听器", () -> HandlerList.unregisterAll(currentListener));
         }
+        if (stockSignListener != null) {
+            StockSignListener currentListener = stockSignListener;
+            stockSignListener = null;
+            cleanup("注销行情告示牌监听器", () -> HandlerList.unregisterAll(currentListener));
+        }
+        if (stockSignService != null) {
+            StockSignService currentSigns = stockSignService;
+            stockSignService = null;
+            cleanup("停止行情告示牌刷新", currentSigns::close);
+        }
         if (chatSession != null) cleanup("清空聊天会话", chatSession::clearAll);
+
+        RecommendationService currentRecommendations = recommendationService;
+        recommendationService = null;
+        if (currentRecommendations != null) {
+            cleanup("关闭推荐服务", currentRecommendations::close);
+        }
 
         StockApiService currentApi = api;
         api = null;
@@ -152,6 +181,7 @@ public final class MineStock extends JavaPlugin {
         economy = null;
         chatSession = null;
         commandExecutor = null;
+        stockSignListener = null;
         getLogger().info("MineStock 插件已禁用");
     }
 
@@ -181,6 +211,8 @@ public final class MineStock extends JavaPlugin {
     public HoldingRepository getHoldingRepo() { return holdingRepo; }
     public EconomyService getEconomy() { return economy; }
     public StockApiService getApi() { return api; }
+    public RecommendationService getRecommendationService() { return recommendationService; }
+    public StockSignService getStockSignService() { return stockSignService; }
     public ChatInputSession getChatSession() { return chatSession; }
     public MStockCommand getCommandExecutor() { return commandExecutor; }
     public LifecycleTaskManager getTaskManager() { return taskManager; }
@@ -193,12 +225,22 @@ public final class MineStock extends JavaPlugin {
         MainConfig newConfig = new MainConfig(this);
         LangUtil newLang = new LangUtil(this);
         StockApiService newApi = new StockApiService(newConfig, getLogger());
+        RecommendationService newRecommendations =
+                new RecommendationService(newConfig, newApi, getLogger());
 
         StockApiService oldApi = api;
+        RecommendationService oldRecommendations = recommendationService;
         mainConfig = newConfig;
         lang = newLang;
         api = newApi;
-        if (commandExecutor != null) commandExecutor.refresh(newApi, newConfig, newLang);
+        recommendationService = newRecommendations;
+        if (commandExecutor != null) {
+            commandExecutor.refresh(newApi, newRecommendations, newConfig, newLang);
+        }
+        if (stockSignService != null) {
+            stockSignService.reconfigure(newApi, newRecommendations, newConfig);
+        }
+        if (oldRecommendations != null) oldRecommendations.close();
         if (oldApi != null) oldApi.close();
         getLogger().info("MineStock 配置已重载");
     }

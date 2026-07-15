@@ -1,3 +1,9 @@
+# 推荐池可写成股票代码列表：
+# recommended-pool:
+#   - "000001"
+#   - "600519"
+#   - "AAPL"
+# 也可写成 auto，由插件每天从沪深 A 股市场自动选股：recommended-pool: auto
 recommended-pool:
   - "000001"
   - "600519"
@@ -6,6 +12,12 @@ recommended-pool:
   - "TSLA"
   - "MSFT"
 recommended-count: 3
+
+# auto 模式拉取并参与评分的候选数量，范围为 recommended-count ~ 500
+auto-candidate-count: 100
+
+# MineStock 告示牌行情刷新周期（秒，最小 30）
+sign-refresh-seconds: 300
 
 # 操作冷却时间（毫秒），旧配置 api-cooldown-seconds 仍兼容
 api-cooldown-ms: 1000

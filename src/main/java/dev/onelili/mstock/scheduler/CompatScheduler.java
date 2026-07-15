@@ -1,6 +1,7 @@
 package dev.onelili.mstock.scheduler;
 
 import org.bukkit.entity.Entity;
+import org.bukkit.Location;
 import org.bukkit.plugin.Plugin;
 
 /**
@@ -43,4 +44,19 @@ public abstract class CompatScheduler {
      * Safe to call from any thread.
      */
     public abstract void runAsync(Plugin plugin, Runnable task);
+
+    /** Runs a task on the thread that owns the supplied block location. */
+    public abstract void runAtLocation(Plugin plugin, Location location, Runnable task);
+
+    /** Runs a delayed task on the thread that owns the supplied block location. */
+    public abstract void runAtLocationLater(Plugin plugin, Location location, Runnable task, long delayTicks);
+
+    /** Starts a repeating background task and returns a cancellation handle. */
+    public abstract ScheduledTaskHandle runAsyncTimer(
+            Plugin plugin, Runnable task, long initialDelayTicks, long periodTicks);
+
+    @FunctionalInterface
+    public interface ScheduledTaskHandle {
+        void cancel();
+    }
 }
