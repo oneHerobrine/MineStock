@@ -48,6 +48,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     private volatile MainConfig config;
     private volatile LangUtil lang;
     private final ChatInputSession session;
+    private final dev.onelili.mstock.ui.PortfolioGUI portfolioGUI;
 
     private final Map<UUID, Long> cooldowns = new ConcurrentHashMap<>();
 
@@ -60,6 +61,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
         this.config = plugin.getMainConfig();
         this.lang = plugin.getLang();
         this.session = plugin.getChatSession();
+        this.portfolioGUI = new dev.onelili.mstock.ui.PortfolioGUI(plugin);
     }
 
     public void refresh(StockApiService api, RecommendationService recommendations,
@@ -134,6 +136,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
             }
             case "recommended", "rec", "r" -> showRecommendations(player);
             case "portfolio", "p" -> showPortfolio(player);
+            case "pg" -> portfolioGUI.open(player);
             case "reload" -> {
                 if (!player.hasPermission("minestock.admin")) {
                     lang.send(player, "reload-no-permission");
@@ -689,7 +692,7 @@ public class MStockCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String label, @NotNull String[] args) {
         if (!plugin.isOperational()) return List.of();
         if (args.length == 1) {
-            return List.of("buy", "sell", "portfolio", "recommended", "reload").stream()
+            return List.of("buy", "sell", "portfolio", "pg", "recommended", "reload").stream()
                     .filter(s -> s.startsWith(args[0].toLowerCase()))
                     .collect(Collectors.toList());
         }

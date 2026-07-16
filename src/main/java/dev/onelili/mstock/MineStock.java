@@ -10,6 +10,7 @@ import dev.onelili.mstock.database.HoldingRepository;
 import dev.onelili.mstock.economy.EconomyService;
 import dev.onelili.mstock.lifecycle.LifecycleTaskManager;
 import dev.onelili.mstock.listener.ChatInputListener;
+import dev.onelili.mstock.listener.PortfolioGUIListener;
 import dev.onelili.mstock.recommend.RecommendationService;
 import dev.onelili.mstock.scheduler.CompatScheduler;
 import dev.onelili.mstock.sign.StockSignListener;
@@ -40,6 +41,7 @@ public final class MineStock extends JavaPlugin {
     private ChatInputSession chatSession;
     private MStockCommand commandExecutor;
     private ChatInputListener chatListener;
+    private PortfolioGUIListener portfolioGUIListener;
     private StockSignListener stockSignListener;
     private StockSignService stockSignService;
     private DynamicCommandRegistration stCommandRegistration;
@@ -97,6 +99,9 @@ public final class MineStock extends JavaPlugin {
             chatListener = new ChatInputListener(this, chatSession);
             getServer().getPluginManager().registerEvents(chatListener, this);
 
+            portfolioGUIListener = new PortfolioGUIListener(this);
+            getServer().getPluginManager().registerEvents(portfolioGUIListener, this);
+
             stockSignService = new StockSignService(
                     this, api, recommendationService, mainConfig);
             stockSignListener = new StockSignListener(this, stockSignService);
@@ -130,6 +135,11 @@ public final class MineStock extends JavaPlugin {
             ChatInputListener currentListener = chatListener;
             chatListener = null;
             cleanup("注销聊天监听器", () -> HandlerList.unregisterAll(currentListener));
+        }
+        if (portfolioGUIListener != null) {
+            PortfolioGUIListener currentListener = portfolioGUIListener;
+            portfolioGUIListener = null;
+            cleanup("注销持仓GUI监听器", () -> HandlerList.unregisterAll(currentListener));
         }
         if (stockSignListener != null) {
             StockSignListener currentListener = stockSignListener;
@@ -181,6 +191,7 @@ public final class MineStock extends JavaPlugin {
         economy = null;
         chatSession = null;
         commandExecutor = null;
+        portfolioGUIListener = null;
         stockSignListener = null;
         getLogger().info("MineStock 插件已禁用");
     }
@@ -256,7 +267,7 @@ public final class MineStock extends JavaPlugin {
             this.plugin = plugin;
             this.delegate = delegate;
             setDescription("股票市场命令");
-            setUsage("/st [recommended|<代码>|buy|sell|portfolio]");
+            setUsage("/st [recommended|<代码>|buy|sell|portfolio|pg]");
             setPermission("minestock.use");
         }
 

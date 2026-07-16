@@ -9,11 +9,11 @@ depend: [ Vault ]
 commands:
   mstock:
     description: 股票市场命令
-    usage: /mstock [recommended|<代码>|buy|sell|portfolio]
+    usage: /mstock [recommended|<代码>|buy|sell|portfolio|pg]
     permission: minestock.use
   stock:
     description: 股票市场命令
-    usage: /stock [recommended|<代码>|buy|sell|portfolio]
+    usage: /stock [recommended|<代码>|buy|sell|portfolio|pg]
     permission: minestock.use
 permissions:
   minestock.use:
